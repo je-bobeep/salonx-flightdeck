@@ -1,0 +1,45 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# environment
+.env
+.env.local
+.env*.local
+!.env.example
+
+# local data — OAuth tokens, SQLite
+.data/
+
+# Next.js
+.next/
+out/
+build/
+next-env.d.ts
+
+# Vercel (in case we ever deploy)
+.vercel/
+
+# logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# TypeScript build
+*.tsbuildinfo
+
+# misc
+coverage/
