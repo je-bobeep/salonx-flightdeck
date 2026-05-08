@@ -6,6 +6,7 @@ import {
   setDevOverride,
   setRowOverride,
 } from "@/lib/theme-overrides-db";
+import { readThemesCachedOnly } from "@/lib/themes-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,6 +16,21 @@ type Kind = "bd" | "dev";
 function readKind(raw: unknown): Kind {
   // Default to "bd" for backward compat with existing callers.
   return raw === "dev" ? "dev" : "bd";
+}
+
+/**
+ * Look up the theme's display name from the most recent cached cluster.
+ * Snapshotted into the override row so name-based recovery in
+ * applyRowOverrides can survive id drift across re-clusters. Falls back to
+ * the themeId itself when the theme isn't in the current cache (e.g.
+ * override placed before clustering ran) — the recovery path tolerates
+ * either-shaped value.
+ */
+function resolveThemeName(themeId: string): string {
+  const cache = readThemesCachedOnly();
+  const themes = cache?.blob.themes ?? [];
+  const found = themes.find((t) => t.id === themeId);
+  return found?.name ?? themeId;
 }
 
 export async function POST(req: Request) {
@@ -36,6 +52,7 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
+    const themeName = resolveThemeName(theme);
     if (kind === "dev") {
       const dev =
         typeof body.devRecordId === "string" ? body.devRecordId : null;
@@ -45,7 +62,7 @@ export async function POST(req: Request) {
           { status: 400 }
         );
       }
-      setDevOverride(dev, theme);
+      setDevOverride(dev, theme, themeName);
       return NextResponse.json({ ok: true });
     }
     const bd = typeof body.bdRecordId === "string" ? body.bdRecordId : null;
@@ -55,7 +72,7 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-    setRowOverride(bd, theme);
+    setRowOverride(bd, theme, themeName);
     return NextResponse.json({ ok: true });
   } catch (e) {
     return NextResponse.json(

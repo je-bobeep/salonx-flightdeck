@@ -84,6 +84,11 @@ export type LinkageData = {
   /** Snapshot of the BD rows referenced by coverage entries, so the view can
    * render uncovered-BD details without a second fetch. Keyed by recordId. */
   bdById: Record<string, BdRow>;
+  /** True when the underlying themes blob has `mode === "unavailable"` —
+   * clustering couldn't be computed (no claude CLI, timeout, zero parseable
+   * themes). The view surfaces a clearer empty state + retry CTA in that
+   * case. Optional for forward-compatibility with older API responses. */
+  themesUnavailable?: boolean;
 };
 
 export type SprintData = {
@@ -194,4 +199,9 @@ export type RoadmapData = {
   risingNotScheduled: { id: string; name: string; bdVolume: number }[];
   currentSprintLabel: string | null;
   nextSprintLabel: string | null;
+  /** True when the underlying themes blob has `mode === "unavailable"`. The
+   * roadmap still renders all tickets (banded), but theme grouping in cells
+   * is missing — the view shows a banner explaining why. Optional for
+   * forward-compatibility with older API responses. */
+  themesUnavailable?: boolean;
 };

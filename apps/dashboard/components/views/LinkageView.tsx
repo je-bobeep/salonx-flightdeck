@@ -80,10 +80,17 @@ export function LinkageView() {
         helper="How well each user-facing theme is served by Feature Dev work. Themes are clustered from BD feedback."
       >
         {data.coverage.length === 0 ? (
-          <p className="px-4 py-6 text-center text-sm text-neutral-500">
-            No theme cluster cached yet — open Triage and click <em>Re-cluster</em> on the
-            Top themes card to generate one.
-          </p>
+          data.themesUnavailable ? (
+            <p className="px-4 py-6 text-center text-sm text-amber-800">
+              Theme clustering is unavailable — open Triage and click{" "}
+              <em>Re-cluster</em> to recompute.
+            </p>
+          ) : (
+            <p className="px-4 py-6 text-center text-sm text-neutral-500">
+              No theme cluster cached yet — open Triage and click{" "}
+              <em>Re-cluster</em> on the Top themes card to generate one.
+            </p>
+          )
         ) : (
           <ul className="divide-y divide-neutral-100">
             {data.coverage.map((c) => (

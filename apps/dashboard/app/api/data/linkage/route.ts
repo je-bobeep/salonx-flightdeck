@@ -129,6 +129,7 @@ export async function GET() {
     orphanDev,
     coverage,
     bdById: bdById_out,
+    themesUnavailable: themesCache?.blob.mode === "unavailable",
   };
   return NextResponse.json(data);
 }

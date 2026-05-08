@@ -24,7 +24,8 @@ This is a deliberate pre-flight kill switch — it exists *before* the first wor
 
 | Date | Workflow | Action | Reason |
 |---|---|---|---|
-| _none yet_ | — | — | — |
+| 2026-05-08 | `lark-bd-poller` | disabled | Pause unattended Claude Code subprocess use against jiaen's personal Anthropic subscription pending discussion with Elwin about routing classification through hubbibi's locally hosted model instead. |
+| 2026-05-08 | `lark-bd-poller` | enabled | Re-enabled after re-reading Anthropic's Claude Code Legal & Compliance page + Consumer Terms §3(7): subscription `claude -p` use for own-workload automation at low volume sits on the permitted side ("ordinary, individual usage" of Claude Code, the explicit-permission carveout). Deployment now Tailnet-only with single-Lark-identity gating. Classifier prompt also simplified — Item field now stores raw original text verbatim, Translate auto-filled by Lark, Category & Sub-category mandatory. |
 
 ## Stuck `proposed_actions` recovery
 

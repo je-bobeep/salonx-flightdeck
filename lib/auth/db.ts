@@ -173,6 +173,21 @@ function getDb(): Database.Database {
       set_at        INTEGER NOT NULL
     );
 
+    -- Phase 3 of theme-clustering-v2: proposals table for brand-new theme
+    -- names emitted by Claude (within MAX_NEW_THEMES_PER_RUN). User accepts
+    -- or rejects; "accepted" is purely a record — adding to the canon is a
+    -- manual edit of lib/themes/taxonomy.ts.
+    CREATE TABLE IF NOT EXISTS taxonomy_proposals (
+      name           TEXT PRIMARY KEY,
+      first_seen_at  INTEGER NOT NULL,
+      last_seen_at   INTEGER NOT NULL,
+      member_count   INTEGER NOT NULL DEFAULT 0,
+      status         TEXT NOT NULL DEFAULT 'pending',
+      decided_at     INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_taxonomy_proposals_status
+      ON taxonomy_proposals(status, last_seen_at DESC);
+
     CREATE TABLE IF NOT EXISTS scoping_telemetry (
       session_id      TEXT PRIMARY KEY REFERENCES scoping_sessions(id),
       flow_type       TEXT NOT NULL,
@@ -207,6 +222,22 @@ function getDb(): Database.Database {
     db.exec(
       "ALTER TABLE scoping_sessions ADD COLUMN investigation_enabled INTEGER NOT NULL DEFAULT 0"
     );
+  }
+
+  // Phase 3: name-based override recovery. Snapshotting the theme name at
+  // override-time lets applyRowOverrides redirect to a slug-matched theme
+  // when ids drift (rename, ad-hoc → candidate transition).
+  const overrideCols = db
+    .prepare("PRAGMA table_info(theme_row_overrides)")
+    .all() as { name: string }[];
+  if (!overrideCols.some((c) => c.name === "theme_name")) {
+    db.exec("ALTER TABLE theme_row_overrides ADD COLUMN theme_name TEXT");
+  }
+  const devOverrideCols = db
+    .prepare("PRAGMA table_info(dev_theme_overrides)")
+    .all() as { name: string }[];
+  if (!devOverrideCols.some((c) => c.name === "theme_name")) {
+    db.exec("ALTER TABLE dev_theme_overrides ADD COLUMN theme_name TEXT");
   }
 
   return db;
@@ -302,6 +333,21 @@ export function setCacheEntry(key: string, payload: unknown): void {
 
 export function deleteCacheEntry(key: string): void {
   getDb().prepare("DELETE FROM lark_cache WHERE cache_key = ?").run(key);
+}
+
+/**
+ * List all `lark_cache` keys that start with the given prefix, ordered
+ * lexicographically descending (so date-suffixed keys come back newest-first
+ * for `YYYY-MM-DD`-shaped suffixes). Used by the themes cache for retention
+ * pruning + history reads.
+ */
+export function listCacheKeysStartingWith(prefix: string): string[] {
+  const rows = getDb()
+    .prepare(
+      "SELECT cache_key FROM lark_cache WHERE cache_key LIKE ? ORDER BY cache_key DESC"
+    )
+    .all(`${prefix}%`) as { cache_key: string }[];
+  return rows.map((r) => r.cache_key);
 }
 
 // --- sessions -------------------------------------------------------------

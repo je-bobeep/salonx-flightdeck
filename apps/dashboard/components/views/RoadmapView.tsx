@@ -208,7 +208,15 @@ export function RoadmapView() {
         scopeThemeIds={roadmapThemeIds}
         themeCounts={themeTicketCounts}
         countLabel="Dev tickets"
+        showSortToggle
       />
+
+      {data.themesUnavailable ? (
+        <section className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          Theme clustering is unavailable. Theme grouping in cells may be
+          missing — open Triage and click <strong>Re-cluster</strong>.
+        </section>
+      ) : null}
 
       {data.risingNotScheduled.length > 0 ? (
         <RisingBanner items={data.risingNotScheduled} />

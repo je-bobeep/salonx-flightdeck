@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import {
-  computeFallbackThemesNow,
   computeFreshThemes,
+  computeUnavailableNow,
   readThemesCachedOnly,
 } from "@/lib/themes-server";
+import { readLastBlob } from "@flightdeck/themes/cache";
 
 export const runtime = "nodejs";
 // Claude clustering with sonnet on ~30 rows takes ~4 min wall-clock. We need
@@ -11,6 +12,12 @@ export const runtime = "nodejs";
 // only deployment so the long ceiling doesn't matter for cost.
 export const maxDuration = 600;
 export const dynamic = "force-dynamic";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const FROM_SCRATCH_COOLDOWN_MS = 5 * 60 * 1000;
+// Module-level state — fine for single-user local. Tracks the last-completed
+// from-scratch trigger so back-to-back clicks don't burn Anthropic spend.
+const lastFromScratchAt: { value: number } = { value: 0 };
 
 export async function GET() {
   try {
@@ -23,13 +30,13 @@ export async function GET() {
       );
       return NextResponse.json({ ok: true, ...cached });
     }
-    // Cache miss: never wait on Claude here — clustering takes minutes and
-    // we'd hang the page. Compute the deterministic fallback synchronously
-    // (fast) so the UI gets a usable starting point. POST is the explicit
-    // trigger for the slow Claude path.
-    console.log("[GET /api/data/themes] cache miss — using fallback");
-    const fallback = await computeFallbackThemesNow();
-    return NextResponse.json({ ok: true, ...fallback });
+    // Cache miss: surface an explicit "unavailable" blob immediately. The
+    // user can hit POST (Re-cluster button in the UI) to kick a real Claude
+    // run; we don't synthesize fallback Sub-category themes here anymore —
+    // that was the regression mode that motivated theme-clustering-v2.
+    console.log("[GET /api/data/themes] cache miss — surfacing 'unavailable' blob");
+    const unavailable = await computeUnavailableNow();
+    return NextResponse.json({ ok: true, ...unavailable });
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : String(e) },
@@ -39,7 +46,9 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  let mode: "incremental" | "from-scratch" = "incremental";
+  // Parse the requested mode if specified. Empty / invalid body falls through
+  // to the default-derivation block below.
+  let mode: "incremental" | "from-scratch" | undefined;
   try {
     const body = (await req.json()) as { mode?: unknown };
     if (body && typeof body === "object") {
@@ -47,8 +56,46 @@ export async function POST(req: Request) {
       else if (body.mode === "incremental") mode = "incremental";
     }
   } catch {
-    // Empty / invalid body — keep default.
+    // Empty / invalid body — leave mode undefined so default logic runs.
   }
+
+  // Default mode: prefer from-scratch when we have no prior full recompute
+  // or it's >24h old. Otherwise keep the legacy incremental default to avoid
+  // unnecessary spend on hot-cache POSTs.
+  if (!mode) {
+    const prev = readLastBlob();
+    const lastFullAtMs = prev?.provenance?.lastFullAt
+      ? Date.parse(prev.provenance.lastFullAt)
+      : null;
+    if (
+      lastFullAtMs === null ||
+      Number.isNaN(lastFullAtMs) ||
+      Date.now() - lastFullAtMs > DAY_MS
+    ) {
+      mode = "from-scratch";
+    } else {
+      mode = "incremental";
+    }
+  }
+
+  // 5-min cooldown on from-scratch only — incremental is cheap.
+  if (mode === "from-scratch") {
+    const elapsed = Date.now() - lastFromScratchAt.value;
+    if (elapsed < FROM_SCRATCH_COOLDOWN_MS) {
+      const retryAfterSec = Math.ceil(
+        (FROM_SCRATCH_COOLDOWN_MS - elapsed) / 1000
+      );
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `Cluster from scratch is rate-limited (5-min cooldown). Try again in ${retryAfterSec}s.`,
+        },
+        { status: 429, headers: { "retry-after": String(retryAfterSec) } }
+      );
+    }
+    lastFromScratchAt.value = Date.now();
+  }
+
   try {
     const fresh = await computeFreshThemes({ mode });
     return NextResponse.json({ ok: true, ...fresh });

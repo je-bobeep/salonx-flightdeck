@@ -28,12 +28,16 @@ export function buildBdFields(input: {
   priority: DetectedPriority;
   number: string;
   todayIso: string;
+  /** Raw original message text. Written verbatim to the Item field in
+   *  whatever language it arrived in (Japanese, Chinese, English, mixed).
+   *  The Lark Translate column is auto-populated from Item, so we don't
+   *  write Translate at all. */
+  text: string;
   requestSourceUrl?: string;
 }): Record<string, unknown> {
   const fields: Record<string, unknown> = {
     [BD_FIELDS.number]: input.number,
-    [BD_FIELDS.item]: input.classification.itemEnglish,
-    [BD_FIELDS.translate]: input.classification.translateOriginal,
+    [BD_FIELDS.item]: input.text,
     [BD_FIELDS.dateRecorded]: input.todayIso,
     [BD_FIELDS.status]: "Logged",
   };
@@ -97,6 +101,7 @@ export async function ingestMessage(
     priority: input.priority,
     number,
     todayIso: todayIso(),
+    text: input.text,
   });
   const created = await createRecord(
     TRACKER.appToken,

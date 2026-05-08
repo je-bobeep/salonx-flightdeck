@@ -39,8 +39,6 @@ export function detectPriority(text: string): DetectedPriority {
 }
 
 export type Classification = {
-  itemEnglish: string;
-  translateOriginal: string;
   category: string[];
   subCategory: string;
   isFeedback: boolean;
@@ -80,9 +78,6 @@ export async function classifyMessage(
     return null;
   }
   const j = result.json as Record<string, unknown>;
-  const itemEnglish = typeof j.itemEnglish === "string" ? j.itemEnglish : "";
-  const translateOriginal =
-    typeof j.translateOriginal === "string" ? j.translateOriginal : "";
   const subCategory = typeof j.subCategory === "string" ? j.subCategory : "";
   const isFeedback = j.isFeedback === true;
   const reasoning = typeof j.reasoning === "string" ? j.reasoning : "";
@@ -97,8 +92,6 @@ export async function classifyMessage(
   const cleanCategory = category.filter((c) => allowed.has(c));
 
   return {
-    itemEnglish,
-    translateOriginal,
     category: cleanCategory,
     subCategory,
     isFeedback,

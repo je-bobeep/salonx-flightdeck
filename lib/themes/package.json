@@ -7,6 +7,7 @@
     "./cluster": "./cluster.ts",
     "./cache": "./cache.ts",
     "./shapes": "./shapes.ts",
+    "./taxonomy": "./taxonomy.ts",
     "./prompts/cluster-bd": "./prompts/cluster-bd.ts"
   },
   "dependencies": {

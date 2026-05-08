@@ -10,6 +10,11 @@ import {
   clusterBdSystemPrompt,
 } from "./prompts/cluster-bd";
 import type { Theme } from "./shapes";
+import {
+  CANDIDATE_THEME_NAMES_LC,
+  MAX_NEW_THEMES_PER_RUN,
+  isCandidateName,
+} from "./taxonomy";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -95,45 +100,17 @@ type ClaudeOutput = {
 };
 
 /**
- * Run the clustering call. Returns the fully-derived Theme[] or null if the
- * Claude output couldn't be parsed.
+ * Parse a raw Claude clustering response into Theme[]. Shared between the
+ * first-pass and the strict-retry pass so the validation logic is identical.
+ * Returns null on hard parse failure (no themes array, unparseable JSON);
+ * returns Theme[] (possibly empty) for any other shape — caller decides
+ * whether the resulting count violates constraints.
  */
-export async function clusterBd(opts: ClusterOptions): Promise<Theme[] | null> {
-  if (opts.rows.length === 0) return [];
-
-  const prevNames = opts.previousThemes?.map((t) => t.name);
-  const systemPrompt = clusterBdSystemPrompt({ previousThemeNames: prevNames });
-
-  // Trim down what we send to keep the prompt small. Translate beats item if
-  // both present (English first).
-  const promptRows = opts.rows.map((r) => ({
-    record_id: r.recordId,
-    item: (r.translate || r.item).slice(0, 240),
-    category: r.category,
-    subCategory: r.subCategory ? r.subCategory.trim() : "",
-    priority: r.priority,
-    ageDays: r.ageDays,
-  }));
-
-  const result = await runClaudeOneShot({
-    systemPrompt,
-    userMessage: JSON.stringify(promptRows),
-    model: opts.model ?? "sonnet",
-    abortSignal: opts.abortSignal,
-    disableMcp: true,
-  });
-
-  if (!result.json || typeof result.json !== "object") {
-    // Surface the raw text + stderr to server logs so we can diagnose Claude
-    // wrapper variations. Truncated to keep logs sane.
-    console.warn(
-      "[themes/cluster] Claude returned unparseable output. resultText[0..400]=%s stderr[0..400]=%s",
-      (result.resultText || "").slice(0, 400),
-      (result.stderr || "").slice(0, 400)
-    );
-    return null;
-  }
-  const out = result.json as ClaudeOutput;
+function parseClaudeThemes(
+  out: ClaudeOutput,
+  byId: Map<string, BdInputRow>,
+  previousThemes: ClusterOptions["previousThemes"]
+): Theme[] | null {
   if (!Array.isArray(out.themes)) {
     console.warn(
       "[themes/cluster] Claude JSON missing 'themes' array. keys=%s",
@@ -141,9 +118,6 @@ export async function clusterBd(opts: ClusterOptions): Promise<Theme[] | null> {
     );
     return null;
   }
-
-  const byId = new Map<string, BdInputRow>();
-  for (const r of opts.rows) byId.set(r.recordId, r);
 
   const now = Date.now();
   const themes: Theme[] = [];
@@ -194,8 +168,9 @@ export async function clusterBd(opts: ClusterOptions): Promise<Theme[] | null> {
     }, 0);
     const rising = newCount >= 3;
 
-    // Stable id via overlap heuristic
-    const id = pickStableId(bdRecordIds, name, opts.previousThemes);
+    // Stable id: candidate names use slugify(name) directly; ad-hoc names
+    // fall back to the overlap heuristic + hash.
+    const id = pickStableId(bdRecordIds, name, previousThemes);
 
     themes.push({
       id,
@@ -214,10 +189,164 @@ export async function clusterBd(opts: ClusterOptions): Promise<Theme[] | null> {
   return themes;
 }
 
+function countNewNames(themes: Theme[]): { count: number; names: string[] } {
+  const offending = themes
+    .map((t) => t.name)
+    .filter((n) => !CANDIDATE_THEME_NAMES_LC.has(n.trim().toLowerCase()));
+  return { count: offending.length, names: offending };
+}
+
+/**
+ * Run the clustering call. Returns the fully-derived Theme[] or null if the
+ * Claude output couldn't be parsed (or the brand-new-name cap was violated
+ * twice).
+ */
+export async function clusterBd(opts: ClusterOptions): Promise<Theme[] | null> {
+  if (opts.rows.length === 0) return [];
+
+  // Trim down what we send to keep the prompt small. Translate beats item if
+  // both present (English first).
+  const promptRows = opts.rows.map((r) => ({
+    record_id: r.recordId,
+    item: (r.translate || r.item).slice(0, 240),
+    category: r.category,
+    subCategory: r.subCategory ? r.subCategory.trim() : "",
+    priority: r.priority,
+    ageDays: r.ageDays,
+  }));
+  const userMessage = JSON.stringify(promptRows);
+
+  const byId = new Map<string, BdInputRow>();
+  for (const r of opts.rows) byId.set(r.recordId, r);
+
+  async function runOnce(strictRetry: boolean): Promise<Theme[] | null> {
+    const systemPrompt = clusterBdSystemPrompt({ strictRetry });
+    const result = await runClaudeOneShot({
+      systemPrompt,
+      userMessage,
+      model: opts.model ?? "sonnet",
+      abortSignal: opts.abortSignal,
+      disableMcp: true,
+    });
+    if (!result.json || typeof result.json !== "object") {
+      console.warn(
+        "[themes/cluster] Claude returned unparseable output. resultText[0..400]=%s stderr[0..400]=%s",
+        (result.resultText || "").slice(0, 400),
+        (result.stderr || "").slice(0, 400)
+      );
+      return null;
+    }
+    return parseClaudeThemes(
+      result.json as ClaudeOutput,
+      byId,
+      opts.previousThemes
+    );
+  }
+
+  // First pass.
+  let themes = await runOnce(false);
+  if (themes === null) return null;
+
+  let { count: newNameCount, names: offendingNames } = countNewNames(themes);
+  if (newNameCount > MAX_NEW_THEMES_PER_RUN) {
+    console.warn(
+      "[themes/cluster] first pass emitted %d brand-new names (cap %d): %s — retrying with strictRetry.",
+      newNameCount,
+      MAX_NEW_THEMES_PER_RUN,
+      offendingNames.slice(0, 5).join(", ")
+    );
+    const retry = await runOnce(true);
+    if (retry === null) {
+      console.warn(
+        "[themes/cluster] strict retry returned no parseable output — failing closed."
+      );
+      return null;
+    }
+    const post = countNewNames(retry);
+    if (post.count > MAX_NEW_THEMES_PER_RUN) {
+      console.warn(
+        "[themes/cluster] strict retry STILL emitted %d brand-new names (cap %d): %s — failing closed.",
+        post.count,
+        MAX_NEW_THEMES_PER_RUN,
+        post.names.slice(0, 5).join(", ")
+      );
+      return null;
+    }
+    console.log(
+      "[themes/cluster] strict retry succeeded — %d new names within cap %d.",
+      post.count,
+      MAX_NEW_THEMES_PER_RUN
+    );
+    themes = retry;
+  }
+
+  return themes;
+}
+
+/**
+ * Extract brand-new (non-candidate) theme names from a parsed Theme[]. Used by
+ * themes-server to record taxonomy_proposals after each successful run.
+ */
+export function extractNewThemeNames(themes: Theme[]): string[] {
+  return themes
+    .map((t) => t.name)
+    .filter((n) => !CANDIDATE_THEME_NAMES_LC.has(n.trim().toLowerCase()));
+}
+
+/**
+ * Parse a raw assign-call response into the additions/newThemes/unplaced
+ * shape. Shared between first-pass and strict-retry pass.
+ */
+function parseAssignOutput(
+  out: AssignClaudeOutput,
+  validRecordIds: Set<string>,
+  validThemeIds: Set<string>
+): IncrementalAssignResult {
+  const placed = new Set<string>();
+
+  const additions = new Map<string, string[]>();
+  for (const a of out.assignments ?? []) {
+    const recordId = typeof a.record_id === "string" ? a.record_id : null;
+    const themeId = typeof a.theme_id === "string" ? a.theme_id : null;
+    if (!recordId || !themeId) continue;
+    if (!validRecordIds.has(recordId)) continue;
+    if (!validThemeIds.has(themeId)) continue;
+    if (placed.has(recordId)) continue;
+    placed.add(recordId);
+    const arr = additions.get(themeId) ?? [];
+    arr.push(recordId);
+    additions.set(themeId, arr);
+  }
+
+  const newThemes: IncrementalAssignResult["newThemes"] = [];
+  for (const raw of out.newThemes ?? []) {
+    const tempId = typeof raw.tempId === "string" ? raw.tempId : "";
+    const name = typeof raw.name === "string" ? raw.name.trim() : "";
+    const description =
+      typeof raw.description === "string" ? raw.description.trim() : "";
+    const ids = Array.isArray(raw.bdRecordIds)
+      ? raw.bdRecordIds.filter(
+          (s): s is string =>
+            typeof s === "string" && validRecordIds.has(s) && !placed.has(s)
+        )
+      : [];
+    if (!name || ids.length === 0) continue;
+    for (const id of ids) placed.add(id);
+    newThemes.push({ tempId, name, description, bdRecordIds: [...new Set(ids)] });
+  }
+
+  const unplaced = [...validRecordIds].filter((id) => !placed.has(id));
+  return { additions, newThemes, unplaced };
+}
+
 /**
  * Assign-only path. Sends Claude only the new rows + a compact catalog of
  * existing themes. Existing assignments are sticky (handled by the caller).
  * Returns additions to fold back in, plus any newly-minted themes.
+ *
+ * Phase 3: enforces MAX_NEW_THEMES_PER_RUN. If the first call returns
+ * `>MAX_NEW_THEMES_PER_RUN` newThemes, retries once with stricter prompt; on
+ * retry failure returns null (themes-server falls back to from-scratch).
  */
 export async function assignNewRows(
   opts: IncrementalAssignOptions
@@ -258,8 +387,6 @@ export async function assignNewRows(
     examples: examplesByThemeId.get(t.id) ?? [],
   }));
 
-  const systemPrompt = assignBdSystemPrompt({ existingThemes: catalog });
-
   const promptRows = opts.newRows.map((r) => ({
     record_id: r.recordId,
     item: (r.translate || r.item).slice(0, 240),
@@ -268,65 +395,70 @@ export async function assignNewRows(
     priority: r.priority,
     ageDays: r.ageDays,
   }));
-
-  const result = await runClaudeOneShot({
-    systemPrompt,
-    userMessage: JSON.stringify(promptRows),
-    model: opts.model ?? "sonnet",
-    abortSignal: opts.abortSignal,
-    disableMcp: true,
-  });
-
-  if (!result.json || typeof result.json !== "object") {
-    console.warn(
-      "[themes/assign] unparseable Claude output. resultText[0..400]=%s",
-      (result.resultText || "").slice(0, 400)
-    );
-    return null;
-  }
-
-  const out = result.json as AssignClaudeOutput;
+  const userMessage = JSON.stringify(promptRows);
   const validRecordIds = new Set(opts.newRows.map((r) => r.recordId));
   const validThemeIds = new Set(opts.existingThemes.map((t) => t.id));
-  const placed = new Set<string>();
 
-  const additions = new Map<string, string[]>();
-  for (const a of out.assignments ?? []) {
-    const recordId = typeof a.record_id === "string" ? a.record_id : null;
-    const themeId = typeof a.theme_id === "string" ? a.theme_id : null;
-    if (!recordId || !themeId) continue;
-    if (!validRecordIds.has(recordId)) continue;
-    if (!validThemeIds.has(themeId)) continue;
-    if (placed.has(recordId)) continue;
-    placed.add(recordId);
-    const arr = additions.get(themeId) ?? [];
-    arr.push(recordId);
-    additions.set(themeId, arr);
+  async function runOnce(
+    strictRetry: boolean
+  ): Promise<IncrementalAssignResult | null> {
+    const systemPrompt = assignBdSystemPrompt({
+      existingThemes: catalog,
+      strictRetry,
+    });
+    const result = await runClaudeOneShot({
+      systemPrompt,
+      userMessage,
+      model: opts.model ?? "sonnet",
+      abortSignal: opts.abortSignal,
+      disableMcp: true,
+    });
+    if (!result.json || typeof result.json !== "object") {
+      console.warn(
+        "[themes/assign] unparseable Claude output. resultText[0..400]=%s",
+        (result.resultText || "").slice(0, 400)
+      );
+      return null;
+    }
+    return parseAssignOutput(
+      result.json as AssignClaudeOutput,
+      validRecordIds,
+      validThemeIds
+    );
   }
 
-  const newThemes: IncrementalAssignResult["newThemes"] = [];
-  for (const raw of out.newThemes ?? []) {
-    const tempId = typeof raw.tempId === "string" ? raw.tempId : "";
-    const name = typeof raw.name === "string" ? raw.name.trim() : "";
-    const description =
-      typeof raw.description === "string" ? raw.description.trim() : "";
-    const ids = Array.isArray(raw.bdRecordIds)
-      ? raw.bdRecordIds.filter(
-          (s): s is string =>
-            typeof s === "string" && validRecordIds.has(s) && !placed.has(s)
-        )
-      : [];
-    if (!name || ids.length === 0) continue;
-    for (const id of ids) placed.add(id);
-    newThemes.push({ tempId, name, description, bdRecordIds: [...new Set(ids)] });
+  let parsed = await runOnce(false);
+  if (!parsed) return null;
+
+  if (parsed.newThemes.length > MAX_NEW_THEMES_PER_RUN) {
+    console.warn(
+      "[themes/assign] first pass minted %d new themes (cap %d): %s — retrying with strictRetry.",
+      parsed.newThemes.length,
+      MAX_NEW_THEMES_PER_RUN,
+      parsed.newThemes
+        .map((t) => t.name)
+        .slice(0, 5)
+        .join(", ")
+    );
+    const retry = await runOnce(true);
+    if (!retry) {
+      console.warn(
+        "[themes/assign] strict retry returned no parseable output — failing closed."
+      );
+      return null;
+    }
+    if (retry.newThemes.length > MAX_NEW_THEMES_PER_RUN) {
+      console.warn(
+        "[themes/assign] strict retry STILL minted %d new themes (cap %d) — failing closed.",
+        retry.newThemes.length,
+        MAX_NEW_THEMES_PER_RUN
+      );
+      return null;
+    }
+    parsed = retry;
   }
 
-  // Cap new-theme count post-hoc for safety (the prompt says cap at 2 but
-  // we enforce here too).
-  newThemes.splice(2);
-
-  const unplaced = [...validRecordIds].filter((id) => !placed.has(id));
-  return { additions, newThemes, unplaced };
+  return parsed;
 }
 
 function dedup(arr: string[]): string[] {
@@ -334,15 +466,22 @@ function dedup(arr: string[]): string[] {
 }
 
 /**
- * Pick a stable theme id by checking overlap with the previous run. If any
- * previous theme shares ≥70% of its members with this one, reuse its id.
- * Otherwise mint a new one (slug of the name + short hash of the member set).
+ * Pick a stable theme id.
+ *
+ * - Candidate (anchored) names: id is `slugify(name)` with no hash suffix.
+ *   Same name → same id across runs by construction; manual overrides survive
+ *   member-set changes (Phase 3 of theme-clustering-v2).
+ * - Ad-hoc names: keep the 70%-overlap heuristic — if any previous theme
+ *   shares ≥70% members, reuse its id. Otherwise mint slug + short hash.
  */
 function pickStableId(
   bdRecordIds: string[],
   name: string,
   previousThemes?: { id: string; bdRecordIds: string[] }[]
 ): string {
+  if (isCandidateName(name)) {
+    return slugify(name);
+  }
   if (previousThemes && previousThemes.length > 0) {
     const memberSet = new Set(bdRecordIds);
     let bestId: string | null = null;
@@ -386,64 +525,15 @@ function shortHash(ids: string[]): string {
 }
 
 /**
- * Deterministic Category × Sub-category grouping. Used as a fallback when
- * Claude clustering is unavailable (timeout, parse failure, no `claude` CLI).
- *
- * Theme name = the dominant Sub-category (or Category if Sub-category is
- * empty). All metrics (volume, median age, rising) are computed identically
- * to the Claude path so downstream consumers don't need to branch.
+ * @deprecated Disabled by Phase 2 of theme-clustering-v2 (2026-05-08).
+ * Sub-category-shaped buckets caused a user-visible regression where the UI
+ * rendered raw Sub-category strings as "themes" identically to real Claude
+ * clusters. We now return [] and let callers surface an empty state instead.
+ * Kept as a no-op so callers don't need to remove call sites in lockstep.
  */
 export function fallbackClusterBd(rows: BdInputRow[]): Theme[] {
-  if (rows.length === 0) return [];
-  const buckets = new Map<string, BdInputRow[]>();
-  for (const r of rows) {
-    const sub = (r.subCategory || "").trim();
-    const cat = r.category[0] || "Uncategorized";
-    const key = sub || cat;
-    const arr = buckets.get(key) ?? [];
-    arr.push(r);
-    buckets.set(key, arr);
-  }
-
-  const now = Date.now();
-  const themes: Theme[] = [];
-  for (const [key, members] of buckets) {
-    const bdRecordIds = members.map((r) => r.recordId);
-    const devRecordIds = [
-      ...new Set(members.flatMap((r) => r.linkedDevIds ?? [])),
-    ];
-    const ages = members
-      .map((r) => r.ageDays)
-      .filter((v): v is number => typeof v === "number")
-      .sort((a, b) => a - b);
-    const bdMedianAgeDays =
-      ages.length === 0 ? null : ages[Math.floor(ages.length / 2)];
-    const newCount = members.reduce((acc, r) => {
-      if (typeof r.dateCreatedMs === "number" && now - r.dateCreatedMs < 14 * DAY_MS)
-        return acc + 1;
-      return acc;
-    }, 0);
-    const dominantCategories = topN(members.flatMap((r) => r.category), 2);
-    const dominantSubCategories = topN(
-      members.map((r) => (r.subCategory || "").trim()).filter((s) => s.length > 0),
-      2
-    );
-    themes.push({
-      id: "auto-" + slugify(key) + "-" + shortHash(bdRecordIds),
-      name: key,
-      description: `Auto-grouped by ${dominantSubCategories.length > 0 ? "sub-category" : "category"}.`,
-      bdRecordIds,
-      devRecordIds,
-      dominantCategories,
-      dominantSubCategories,
-      bdVolume: bdRecordIds.length,
-      bdMedianAgeDays,
-      rising: newCount >= 3,
-    });
-  }
-  // Sort biggest first for stable ordering in views.
-  themes.sort((a, b) => b.bdVolume - a.bdVolume);
-  return themes;
+  void rows;
+  return [];
 }
 
 function topN(arr: string[], n: number): string[] {

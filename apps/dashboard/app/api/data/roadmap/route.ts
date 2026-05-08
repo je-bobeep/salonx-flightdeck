@@ -8,7 +8,7 @@ import {
   buildBdToThemeMap,
   readThemesCachedOnly,
 } from "@/lib/themes-server";
-import { listDevOverrides } from "@/lib/theme-overrides-db";
+import { listDevOverrides, type RowOverride } from "@/lib/theme-overrides-db";
 import { nextSprintLabel } from "@/lib/sprint-naming";
 import { statusBucket } from "@/lib/status";
 import type {
@@ -145,19 +145,33 @@ function toRoadmapTicket(
   };
 }
 
+function slugifyName(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 32);
+}
+
 function pickThemeForDev(
   dev: DevRow,
   themes: Theme[],
-  devOverrides: Map<string, string>
+  devOverrides: Map<string, RowOverride>
 ): Theme | null {
   if (themes.length === 0) return null;
-  // Manual override wins over both authoritative joins. If the override
-  // points to a theme that no longer exists (renamed / deleted on a
-  // re-cluster) drop silently and fall through to the scoring logic.
-  const overrideThemeId = devOverrides.get(dev.recordId);
-  if (overrideThemeId) {
-    const overridden = themes.find((t) => t.id === overrideThemeId);
+  // Manual override wins over both authoritative joins. If the override's id
+  // is missing (rename / re-cluster), try to recover via the snapshotted
+  // theme name: slug-match against current themes. Drop silently if both
+  // fail and fall through to scoring.
+  const override = devOverrides.get(dev.recordId);
+  if (override) {
+    const overridden = themes.find((t) => t.id === override.themeId);
     if (overridden) return overridden;
+    if (override.themeName) {
+      const wanted = slugifyName(override.themeName);
+      const recovered = themes.find((t) => slugifyName(t.name) === wanted);
+      if (recovered) return recovered;
+    }
   }
   // A Dev ticket belongs to a theme ONLY via authoritative cross-references:
   //   (a) the Dev's record_id is in theme.devRecordIds — i.e. the cluster
@@ -338,6 +352,7 @@ export async function GET() {
     risingNotScheduled,
     currentSprintLabel: currentSprint,
     nextSprintLabel: next,
+    themesUnavailable: themesCache?.blob.mode === "unavailable",
   };
   return NextResponse.json(data);
 }

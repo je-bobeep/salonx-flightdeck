@@ -23,12 +23,15 @@ export type ThemesBlob = {
   /** ISO date the cluster was computed. */
   computedAt: string;
   /** "claude" = real cross-cutting cluster from runClaudeOneShot.
-   * "fallback" = deterministic Category × Sub-category grouping (used when
-   * the Claude call timed out or the runtime can't reach the CLI).
-   * Persisted because the UI suppresses rising-dependent CTAs and shows a
-   * banner in fallback mode — and ID-prefix detection is unreliable since
-   * pickStableId can carry old "auto-" ids forward into a Claude run. */
-  mode: "claude" | "fallback";
+   * "fallback" = legacy deterministic Category × Sub-category grouping.
+   * Retained in the union for compatibility with cached blobs written before
+   * Phase 2 of theme-clustering-v2 (2026-05-08); writeThemesCache no longer
+   * persists this mode.
+   * "unavailable" = Clustering couldn't be computed (no `claude` CLI,
+   * timeout, or zero parseable themes). The blob carries an empty themes
+   * array; consumers render an empty state, not fallback Sub-category
+   * buckets. */
+  mode: "claude" | "fallback" | "unavailable";
   themes: Theme[];
   /** Tracks how often we've appended-only (incremental) since the last full
    * recompute. Lets the UI nudge "cluster from scratch" when the cluster has
@@ -37,5 +40,9 @@ export type ThemesBlob = {
     lastFullAt: string;
     lastIncrementalAt: string | null;
     incrementalSinceFull: number;
+    /** Number of new themes minted in the most recent incremental run. Used
+     * as a drift signal — if >0, computeFreshThemes promotes the next request
+     * to from-scratch. Phase 4 of theme-clustering-v2. */
+    lastIncrementalNewThemeCount?: number;
   };
 };

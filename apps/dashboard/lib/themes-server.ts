@@ -5,17 +5,17 @@ import { fetchAllBd, projectBd } from "./data-derive";
 import {
   assignNewRows,
   clusterBd,
-  fallbackClusterBd,
+  extractNewThemeNames,
   type BdInputRow,
 } from "@flightdeck/themes/cluster";
 import {
   readLastBlob,
-  readPreviousThemes,
   readTodayCache,
   writeThemesCache,
 } from "@flightdeck/themes/cache";
 import type { Theme, ThemesBlob } from "@flightdeck/themes/shapes";
 import { listRowOverrides } from "./theme-overrides-db";
+import { recordProposals } from "./taxonomy-proposals-db";
 
 export type ThemesFetchResult = {
   blob: ThemesBlob;
@@ -77,15 +77,25 @@ async function fetchAndSampleInputs(): Promise<BdInputRow[]> {
   return projectInputs(sampled);
 }
 
-/** Synchronous deterministic-only path. Used by GET on cache miss so the UI
- * never waits ~4 min for a Claude call on first load. POST is the opt-in
- * trigger for the slow Claude path. */
-export async function computeFallbackThemesNow(): Promise<ThemesFetchResult> {
-  const inputs = await fetchAndSampleInputs();
-  const themes = fallbackClusterBd(inputs);
-  const themesAfterOverrides = applyRowOverrides(themes);
-  const blob = writeThemesCache(themesAfterOverrides, "fallback", "full");
-  return { blob, fetchedAt: Date.now(), fresh: true };
+/**
+ * Synchronous "unavailable" path. Used by GET on cache miss so the UI never
+ * waits ~4 min for a Claude call on first load. Returns an explicit empty
+ * blob with `mode: "unavailable"`; POST (Re-cluster) is the explicit trigger
+ * for the slow Claude path. We deliberately do NOT synthesize fallback
+ * Sub-category themes here — that was the regression mode that motivated
+ * theme-clustering-v2.
+ */
+export async function computeUnavailableNow(): Promise<ThemesFetchResult> {
+  return {
+    blob: {
+      computedAt: new Date().toISOString(),
+      mode: "unavailable" as const,
+      themes: [],
+      provenance: undefined,
+    },
+    fetchedAt: Date.now(),
+    fresh: true,
+  };
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -148,12 +158,16 @@ function recomputeMetrics(themes: Theme[], byId: Map<string, BdInputRow>): Theme
  * Apply manual per-row theme overrides on top of a cluster result. Overrides
  * persist across incremental and from-scratch runs (the user's "no, this
  * goes here" judgement is sticky). Drops overrides that point at a theme
- * that no longer exists.
+ * that no longer exists, except when name-based recovery succeeds.
+ *
+ * Phase 3 of theme-clustering-v2: when an override's saved theme_id is
+ * missing from the new themes BUT a current theme has a slug-matching name
+ * to the override's saved theme_name, redirect the override to that theme.
+ * Survives renames within the canonical vocabulary.
  */
 function applyRowOverrides(themes: Theme[]): Theme[] {
   const overrides = listRowOverrides();
   if (overrides.size === 0) return themes;
-  const themeById = new Map(themes.map((t) => [t.id, t]));
   // Strip overridden ids from any current home, then re-add them to the
   // override target.
   const overrideIds = new Set(overrides.keys());
@@ -161,39 +175,78 @@ function applyRowOverrides(themes: Theme[]): Theme[] {
     ...t,
     bdRecordIds: t.bdRecordIds.filter((id) => !overrideIds.has(id)),
   }));
-  for (const [bdId, themeId] of overrides) {
-    const target = stripped.find((t) => t.id === themeId);
+  // slug → theme map for name-based recovery.
+  const themeBySlug = new Map<string, Theme>();
+  for (const t of stripped) themeBySlug.set(slugify(t.name), t);
+
+  for (const [bdId, override] of overrides) {
+    let target = stripped.find((t) => t.id === override.themeId);
+    if (!target && override.themeName) {
+      const recovered = themeBySlug.get(slugify(override.themeName));
+      if (recovered) {
+        console.warn(
+          "[themes-server] override bd=%s recovered by name match: themeId=%s -> %s (name=%s)",
+          bdId,
+          override.themeId,
+          recovered.id,
+          override.themeName
+        );
+        target = recovered;
+      }
+    }
     if (!target) {
       console.warn(
-        "[themes-server] dropping override bd=%s -> theme=%s (theme missing)",
+        "[themes-server] dropping override bd=%s -> theme=%s (theme missing, name=%s)",
         bdId,
-        themeId
+        override.themeId,
+        override.themeName ?? "<null>"
       );
       continue;
     }
     if (!target.bdRecordIds.includes(bdId)) target.bdRecordIds.push(bdId);
   }
-  void themeById; // eslint reachability
   return stripped;
+}
+
+/** Build a {themeName: bdRecordIds.length} map for taxonomy_proposals
+ * member-count tracking. */
+function buildMemberCountMap(themes: Theme[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const t of themes) out[t.name] = t.bdRecordIds.length;
+  return out;
 }
 
 async function computeFromScratch(
   inputs: BdInputRow[]
-): Promise<{ themes: Theme[]; mode: "claude" | "fallback" }> {
-  const previous = readPreviousThemes();
+): Promise<{ themes: Theme[]; mode: "claude" | "unavailable" }> {
+  // Gate `previousThemes` on the prior blob's mode. If the last good blob was
+  // a fallback (Sub-category bucketing) or unavailable (no themes), we MUST
+  // NOT pass those names back into the cluster prompt — the prompt's "reuse
+  // when ≥70% members overlap" clause would otherwise leak Sub-category-shaped
+  // names forward into a real Claude run. Phase 2 of theme-clustering-v2.
+  const prevBlob = readLastBlob();
+  const usablePrev =
+    prevBlob && prevBlob.mode === "claude" ? prevBlob.themes : [];
+  if (prevBlob && prevBlob.mode !== "claude") {
+    console.warn(
+      "[themes-server] previous blob mode=%s — discarding previousThemes to prevent name leakage into clusterBd.",
+      prevBlob.mode
+    );
+  }
+
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), CLUSTER_TIMEOUT_MS);
   let themes: Awaited<ReturnType<typeof clusterBd>> = null;
   try {
     themes = await clusterBd({
       rows: inputs,
-      previousThemes: previous,
+      previousThemes: usablePrev,
       model: "opus",
       abortSignal: ac.signal,
     });
   } catch (err) {
     console.warn(
-      "[themes-server] clusterBd threw — falling back to deterministic grouping. err=%s",
+      "[themes-server] clusterBd threw — surfacing 'unavailable' blob. err=%s",
       err instanceof Error ? err.message : String(err)
     );
     themes = null;
@@ -203,11 +256,10 @@ async function computeFromScratch(
 
   if (!themes || themes.length === 0) {
     console.warn(
-      "[themes-server] Claude returned %s — using deterministic fallback over %d rows.",
-      themes === null ? "no parseable output" : "zero themes",
-      inputs.length
+      "[themes-server] Claude returned %s — no fallback render. Surfacing empty 'unavailable' blob.",
+      themes === null ? "no parseable output" : "zero themes"
     );
-    return { themes: fallbackClusterBd(inputs), mode: "fallback" };
+    return { themes: [], mode: "unavailable" as const };
   }
   return { themes, mode: "claude" };
 }
@@ -217,8 +269,11 @@ async function computeIncremental(
   prevBlob: ThemesBlob
 ): Promise<{
   themes: Theme[];
-  mode: "claude" | "fallback";
+  mode: "claude" | "unavailable";
   runKind: "full" | "incremental";
+  /** Count of brand-new themes minted by this incremental run. Persisted into
+   * provenance for the Phase 4 drift signal — >0 forces from-scratch next time. */
+  newThemeCount: number;
 }> {
   const byId = new Map<string, BdInputRow>();
   for (const r of inputs) byId.set(r.recordId, r);
@@ -240,6 +295,7 @@ async function computeIncremental(
       themes: recomputeMetrics(themesPruned, byId),
       mode: "claude",
       runKind: "incremental",
+      newThemeCount: 0,
     };
   }
 
@@ -273,7 +329,7 @@ async function computeIncremental(
       "[themes-server] incremental assign failed — running from-scratch instead."
     );
     const fs = await computeFromScratch(inputs);
-    return { ...fs, runKind: "full" };
+    return { ...fs, runKind: "full", newThemeCount: 0 };
   }
 
   // Merge: append additions to existing themes, mint new themes from the
@@ -297,6 +353,7 @@ async function computeIncremental(
     }
   }
 
+  let mintedThemeCount = 0;
   for (const nt of assignResult.newThemes) {
     const slug = slugify(nt.name);
     const collision = existingNameSlugs.get(slug);
@@ -325,6 +382,7 @@ async function computeIncremental(
     merged.push(newTheme);
     themeIndex.set(newTheme.id, newTheme);
     existingNameSlugs.set(slug, newTheme.id);
+    mintedThemeCount += 1;
   }
 
   // Unplaced rows from the model — surface a warning. Don't fail the run;
@@ -341,8 +399,11 @@ async function computeIncremental(
     themes: recomputeMetrics(merged, byId),
     mode: "claude",
     runKind: "incremental",
+    newThemeCount: mintedThemeCount,
   };
 }
+
+const SEVEN_DAYS_MS = 7 * DAY_MS;
 
 export async function computeFreshThemes(
   opts: { mode?: "incremental" | "from-scratch" } = {}
@@ -352,33 +413,70 @@ export async function computeFreshThemes(
 
   const prev = readLastBlob();
 
-  // Force from-scratch when we have no usable previous claude blob.
+  // Drift bounding (Phase 4 of theme-clustering-v2): force from-scratch when
+  //   (a) prior blob is missing / non-claude / empty,
+  //   (b) ≥7 days since the last full recompute, OR
+  //   (c) the most recent incremental run minted ≥1 new theme — strong signal
+  //       that the existing canon no longer fits incoming rows.
   let mode: "incremental" | "from-scratch" = requested;
-  if (!prev || prev.mode === "fallback" || prev.themes.length === 0) {
-    if (requested === "incremental") {
-      console.warn(
-        "[themes-server] incremental requested but previous blob unusable (mode=%s themes=%d) — running from-scratch.",
-        prev?.mode ?? "missing",
-        prev?.themes.length ?? 0
-      );
-    }
+  let promoteReason: string | null = null;
+
+  if (!prev || prev.mode !== "claude" || prev.themes.length === 0) {
     mode = "from-scratch";
+    promoteReason = `prior blob unusable (mode=${prev?.mode ?? "missing"} themes=${prev?.themes.length ?? 0})`;
+  } else if (mode === "incremental") {
+    const lastFullAt = prev.provenance?.lastFullAt
+      ? Date.parse(prev.provenance.lastFullAt)
+      : null;
+    const lastNewCount = prev.provenance?.lastIncrementalNewThemeCount ?? 0;
+    if (lastFullAt === null || Number.isNaN(lastFullAt)) {
+      mode = "from-scratch";
+      promoteReason = "no lastFullAt timestamp";
+    } else if (Date.now() - lastFullAt > SEVEN_DAYS_MS) {
+      mode = "from-scratch";
+      promoteReason = `>7d since lastFullAt (${prev.provenance?.lastFullAt})`;
+    } else if (lastNewCount > 0) {
+      mode = "from-scratch";
+      promoteReason = `latest incremental minted ${lastNewCount} new theme(s) — drift signal`;
+    }
+  }
+
+  if (promoteReason && requested === "incremental") {
+    console.warn(
+      "[themes-server] promoting incremental → from-scratch: %s",
+      promoteReason
+    );
   }
 
   if (mode === "incremental" && prev) {
     const inc = await computeIncremental(inputs, prev);
     const themesAfterOverrides = applyRowOverrides(inc.themes);
+    if (inc.mode === "claude" && themesAfterOverrides.length > 0) {
+      // Record any brand-new (non-canonical) names that survived the
+      // strict-cap retry path so the user can accept/reject them in the UI.
+      recordProposals(
+        extractNewThemeNames(themesAfterOverrides),
+        buildMemberCountMap(themesAfterOverrides)
+      );
+    }
     const blob = writeThemesCache(
       themesAfterOverrides,
       inc.mode,
-      inc.runKind
+      inc.runKind,
+      inc.newThemeCount
     );
     return { blob, fetchedAt: Date.now(), fresh: true };
   }
 
   const fs = await computeFromScratch(inputs);
   const themesAfterOverrides = applyRowOverrides(fs.themes);
-  const blob = writeThemesCache(themesAfterOverrides, fs.mode, "full");
+  if (fs.mode === "claude" && themesAfterOverrides.length > 0) {
+    recordProposals(
+      extractNewThemeNames(themesAfterOverrides),
+      buildMemberCountMap(themesAfterOverrides)
+    );
+  }
+  const blob = writeThemesCache(themesAfterOverrides, fs.mode, "full", 0);
   return { blob, fetchedAt: Date.now(), fresh: true };
 }
 

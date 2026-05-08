@@ -96,7 +96,22 @@ export function useRefreshThemes() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ mode: mode ?? "incremental" }),
       });
-      if (!res.ok) throw new Error(`themes refresh: HTTP ${res.status}`);
+      if (!res.ok) {
+        // Surface the server's structured error verbatim — the route emits a
+        // human-readable message for the 429 cooldown case that we want the
+        // user to see, not a generic "HTTP 429".
+        let serverMsg = "";
+        try {
+          const body = (await res.json()) as { error?: unknown };
+          const err = body?.error;
+          if (typeof err === "string") serverMsg = err;
+        } catch {
+          // ignore
+        }
+        throw new Error(
+          serverMsg || `themes refresh: HTTP ${res.status}`
+        );
+      }
       return (await res.json()) as ThemesResponse;
     },
     onSuccess: () => {
@@ -202,5 +217,47 @@ export function useDecisionsSearchIndex() {
         "/api/data/decisions/search-index"
       ),
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+export type TaxonomyProposalsResponse = {
+  ok: boolean;
+  proposals: Array<{
+    name: string;
+    firstSeenAt: number;
+    lastSeenAt: number;
+    memberCount: number;
+  }>;
+  error?: string;
+};
+
+/** Pending taxonomy proposals — names Claude minted that aren't in
+ * CANDIDATE_THEMES yet. The user accepts (record-only) or rejects each. */
+export function useTaxonomyProposals() {
+  return useQuery<TaxonomyProposalsResponse>({
+    queryKey: ["taxonomy-proposals"],
+    queryFn: () => jsonGet<TaxonomyProposalsResponse>("/api/data/themes/proposals"),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** Accept or reject a pending proposal. Records the decision in the
+ * taxonomy_proposals table; the actual canon edit is manual (taxonomy.ts). */
+export function useDecideProposal() {
+  const qc = useQueryClient();
+  return useMutation<{ ok: boolean }, Error, { name: string; action: "accept" | "reject" }>({
+    mutationFn: async ({ name, action }) => {
+      const res = await fetch("/api/data/themes/proposals", {
+        method: "POST",
+        cache: "no-store",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name, action }),
+      });
+      if (!res.ok) throw new Error(`proposal decide: HTTP ${res.status}`);
+      return (await res.json()) as { ok: boolean };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["taxonomy-proposals"] });
+    },
   });
 }
