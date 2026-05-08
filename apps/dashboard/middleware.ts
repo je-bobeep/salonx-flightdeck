@@ -13,11 +13,12 @@ export function middleware(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  // Pages without a cookie land back at "/" (sign-in page).
-  const url = req.nextUrl.clone();
-  url.pathname = "/";
-  url.search = "";
-  return NextResponse.redirect(url);
+  // Pages without a cookie land back at "/" (sign-in page). Use NEXTAUTH_URL
+  // as the redirect base — when Next.js binds to 127.0.0.1 and traffic arrives
+  // via Tailscale's userspace forwarder, req.nextUrl reports `localhost` as the
+  // host, which would 404 in the user's browser.
+  const base = process.env.NEXTAUTH_URL ?? req.nextUrl.origin;
+  return NextResponse.redirect(new URL("/", base));
 }
 
 export const config = {
