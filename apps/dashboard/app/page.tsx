@@ -1,11 +1,14 @@
 import { redirect } from "next/navigation";
-import { getToken } from "@flightdeck/auth/db";
+import { cookies } from "next/headers";
+import { getSession, SESSION_COOKIE_NAME } from "@flightdeck/auth/db";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const token = getToken();
-  if (token) {
+  const cookieStore = await cookies();
+  const sessionId = cookieStore.get(SESSION_COOKIE_NAME)?.value;
+  const session = sessionId ? getSession(sessionId) : null;
+  if (session) {
     redirect("/today");
   }
 
@@ -14,7 +17,7 @@ export default async function Home() {
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">salonx-flightdeck</h1>
         <p className="text-sm text-neutral-500">
-          Personal PM ops tooling for SalonX. Local-only.
+          Personal PM ops tooling for SalonX. Per-device sign-in via Lark.
         </p>
       </header>
       <section className="rounded-lg border border-neutral-200 bg-white p-6 shadow-card">

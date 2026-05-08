@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -114,6 +115,21 @@ function getDb(): Database.Database {
       payload_json TEXT NOT NULL,
       fetched_at INTEGER NOT NULL
     );
+
+    -- Per-browser sessions. Each successful Lark OAuth (with the configured
+    -- open_id allowlist) issues one row. Cookie value IS the session id.
+    -- Distinct from the tokens singleton (Lark UAT). Sign-out drops the row
+    -- but leaves the Lark token intact so the background poller keeps working.
+    CREATE TABLE IF NOT EXISTS sessions (
+      id           TEXT PRIMARY KEY,
+      open_id      TEXT NOT NULL,
+      created_at   INTEGER NOT NULL,
+      last_seen_at INTEGER NOT NULL,
+      user_agent   TEXT,
+      ip           TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_sessions_open_id ON sessions(open_id);
+    CREATE INDEX IF NOT EXISTS idx_sessions_last_seen ON sessions(last_seen_at);
 
     CREATE TABLE IF NOT EXISTS lark_thread_cache (
       thread_id     TEXT PRIMARY KEY,
@@ -274,4 +290,76 @@ export function setCacheEntry(key: string, payload: unknown): void {
 
 export function deleteCacheEntry(key: string): void {
   getDb().prepare("DELETE FROM lark_cache WHERE cache_key = ?").run(key);
+}
+
+// --- sessions -------------------------------------------------------------
+
+export const SESSION_COOKIE_NAME = "fd_session";
+export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+export type SessionRow = {
+  id: string;
+  openId: string;
+  createdAt: number;
+  lastSeenAt: number;
+  userAgent: string | null;
+  ip: string | null;
+};
+
+export function createSession(
+  openId: string,
+  userAgent?: string | null,
+  ip?: string | null
+): string {
+  const id = crypto.randomBytes(32).toString("base64url");
+  const now = Date.now();
+  getDb()
+    .prepare(
+      "INSERT INTO sessions (id, open_id, created_at, last_seen_at, user_agent, ip) VALUES (?, ?, ?, ?, ?, ?)"
+    )
+    .run(id, openId, now, now, userAgent ?? null, ip ?? null);
+  return id;
+}
+
+export function getSession(id: string): SessionRow | null {
+  const row = getDb()
+    .prepare("SELECT * FROM sessions WHERE id = ?")
+    .get(id) as
+    | {
+        id: string;
+        open_id: string;
+        created_at: number;
+        last_seen_at: number;
+        user_agent: string | null;
+        ip: string | null;
+      }
+    | undefined;
+  if (!row) return null;
+  // Expire stale sessions on lookup so we don't need a sweeper.
+  if (Date.now() - row.last_seen_at > SESSION_TTL_MS) {
+    deleteSession(id);
+    return null;
+  }
+  return {
+    id: row.id,
+    openId: row.open_id,
+    createdAt: row.created_at,
+    lastSeenAt: row.last_seen_at,
+    userAgent: row.user_agent,
+    ip: row.ip,
+  };
+}
+
+export function touchSession(id: string): void {
+  getDb()
+    .prepare("UPDATE sessions SET last_seen_at = ? WHERE id = ?")
+    .run(Date.now(), id);
+}
+
+export function deleteSession(id: string): void {
+  getDb().prepare("DELETE FROM sessions WHERE id = ?").run(id);
+}
+
+export function deleteAllSessionsForOpenId(openId: string): void {
+  getDb().prepare("DELETE FROM sessions WHERE open_id = ?").run(openId);
 }

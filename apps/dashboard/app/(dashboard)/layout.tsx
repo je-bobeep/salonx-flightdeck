@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
-import { getToken } from "@flightdeck/auth/db";
+import { cookies } from "next/headers";
+import { getSession, SESSION_COOKIE_NAME } from "@flightdeck/auth/db";
 import { whoami } from "@flightdeck/lark/whoami";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { ReauthBanner } from "@/components/layout/ReauthBanner";
@@ -14,8 +15,10 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const token = getToken();
-  if (!token) {
+  const cookieStore = await cookies();
+  const sessionId = cookieStore.get(SESSION_COOKIE_NAME)?.value;
+  const session = sessionId ? getSession(sessionId) : null;
+  if (!session) {
     redirect("/");
   }
 
