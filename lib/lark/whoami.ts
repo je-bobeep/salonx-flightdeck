@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { LARK_USER_INFO_URL } from "./endpoints";
-import { LarkAuthError, refreshToken } from "./oauth";
+import { LarkAuthError, refreshTokenSafe } from "./oauth";
 import { getToken, updateProfile, type StoredToken } from "../auth/db";
 
 const UserInfoResponse = z.object({
@@ -59,7 +59,7 @@ export async function whoami(): Promise<WhoamiResult | null> {
     if (Date.now() > token.refreshExpiresAt) {
       throw new LarkAuthError("Refresh token expired — re-auth required", undefined, true);
     }
-    token = await refreshToken(token.refreshToken);
+    token = await refreshTokenSafe(token.accessToken);
     ({ status, body } = await tryCall(token));
   }
 

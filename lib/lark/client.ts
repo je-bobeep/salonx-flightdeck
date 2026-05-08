@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { getToken, type StoredToken } from "../auth/db";
-import { LarkAuthError, refreshToken } from "./oauth";
+import { LarkAuthError, refreshTokenSafe } from "./oauth";
 
 export const LARK_API_BASE = "https://open.larksuite.com/open-apis";
 
@@ -27,17 +27,10 @@ async function refreshOnce(triedAccessToken: string): Promise<StoredToken> {
   ) {
     return inFlightRefresh.promise;
   }
-  // Re-read from DB — another request may have just written a fresh token,
-  // in which case our stored refresh_token is already the new one.
-  const current = getToken();
-  if (!current) {
-    throw new LarkAuthError("Not signed in to Lark", undefined, true);
-  }
-  if (current.accessToken !== triedAccessToken) {
-    // Someone else already refreshed under us. Use what's in the DB.
-    return current;
-  }
-  const promise = refreshToken(current.refreshToken).finally(() => {
+  // refreshTokenSafe handles the "another holder already refreshed" case via
+  // the SQLite mutex; we just delegate. The in-process coalesce above still
+  // saves us multiple Node-internal callers from each acquiring the mutex.
+  const promise = refreshTokenSafe(triedAccessToken).finally(() => {
     if (inFlightRefresh && inFlightRefresh.forAccessToken === triedAccessToken) {
       inFlightRefresh = null;
     }

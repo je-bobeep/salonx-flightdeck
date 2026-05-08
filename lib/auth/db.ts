@@ -131,6 +131,18 @@ function getDb(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_sessions_open_id ON sessions(open_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_last_seen ON sessions(last_seen_at);
 
+    -- Cross-process serialization for Lark refresh-token rotation. The dashboard
+    -- and poller each hold their own Node process; without this, both can read
+    -- the same refresh_token from the singleton tokens row, both POST it to
+    -- Lark, the second gets error 20064 ("token already used"), and the user
+    -- is force-reauthed for no reason. Only one row ever, id=1.
+    CREATE TABLE IF NOT EXISTS refresh_mutex (
+      id          INTEGER PRIMARY KEY CHECK (id = 1),
+      holder      TEXT NOT NULL,
+      acquired_at INTEGER NOT NULL,
+      expires_at  INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS lark_thread_cache (
       thread_id     TEXT PRIMARY KEY,
       bd_record_id  TEXT,
@@ -362,4 +374,45 @@ export function deleteSession(id: string): void {
 
 export function deleteAllSessionsForOpenId(openId: string): void {
   getDb().prepare("DELETE FROM sessions WHERE open_id = ?").run(openId);
+}
+
+// --- refresh mutex --------------------------------------------------------
+
+/**
+ * Try to acquire the singleton Lark-refresh mutex. Returns true if we now hold
+ * it (no live holder, or previous holder's TTL expired). Caller MUST call
+ * `releaseRefreshMutex(holder)` in a finally block.
+ *
+ * Mutex is a single row keyed id=1; serialization is via SQLite's write lock
+ * inside `db.transaction()` (better-sqlite3 transactions are synchronous, so
+ * no risk of awaiting inside the critical section).
+ */
+export function acquireRefreshMutex(holder: string, ttlMs: number): boolean {
+  const db = getDb();
+  const now = Date.now();
+  const expireAt = now + ttlMs;
+  const acquire = db.transaction((): boolean => {
+    const row = db
+      .prepare(
+        "SELECT holder, expires_at FROM refresh_mutex WHERE id = 1"
+      )
+      .get() as { holder: string; expires_at: number } | undefined;
+    if (row && row.expires_at > now) return false;
+    db.prepare(
+      `INSERT INTO refresh_mutex (id, holder, acquired_at, expires_at)
+       VALUES (1, @holder, @now, @expireAt)
+       ON CONFLICT(id) DO UPDATE SET
+         holder = excluded.holder,
+         acquired_at = excluded.acquired_at,
+         expires_at = excluded.expires_at`
+    ).run({ holder, now, expireAt });
+    return true;
+  });
+  return acquire();
+}
+
+export function releaseRefreshMutex(holder: string): void {
+  getDb()
+    .prepare("DELETE FROM refresh_mutex WHERE id = 1 AND holder = ?")
+    .run(holder);
 }

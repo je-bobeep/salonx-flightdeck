@@ -28,7 +28,9 @@ export const config = {
   //   - the auth API surface used by the sign-in flow itself
   //   - Next internals + static assets
   matcher: [
-    // Match every path EXCEPT: root "/", /auth/*, /api/auth/*, /_next/*, favicon
-    "/((?!api/auth|auth/|_next/|favicon).+)",
+    // Match every path EXCEPT: root "/", /auth/*, /api/auth/*, /api/health,
+    // /_next/*, favicon. /api/health is unauthenticated for Uptime Kuma /
+    // Prometheus polling; it returns operational signals only, no PII.
+    "/((?!api/auth|api/health|auth/|_next/|favicon).+)",
   ],
 };

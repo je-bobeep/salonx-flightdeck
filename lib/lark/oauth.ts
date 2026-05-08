@@ -1,7 +1,14 @@
+import crypto from "node:crypto";
 import { z } from "zod";
 import { LARK_AUTHORIZE_URL, LARK_TOKEN_URL } from "./endpoints";
 import { readEnv, redirectUri, SCOPES, type FlightdeckEnv } from "./env";
-import { saveToken, type StoredToken } from "../auth/db";
+import {
+  acquireRefreshMutex,
+  getToken,
+  releaseRefreshMutex,
+  saveToken,
+  type StoredToken,
+} from "../auth/db";
 
 export class LarkAuthError extends Error {
   constructor(
@@ -112,4 +119,58 @@ export async function refreshToken(
   // new one means re-auth from scratch. See memory/reference_lark_base.md.
   saveToken(token);
   return { ...token, updatedAt: Date.now() };
+}
+
+const REFRESH_MUTEX_TTL_MS = 30_000; // generous bound for one Lark API roundtrip
+const REFRESH_MUTEX_WAIT_MS = 60_000;
+const REFRESH_MUTEX_POLL_MS = 200;
+
+/**
+ * Cross-process-safe refresh: acquire the SQLite-backed refresh_mutex before
+ * calling Lark, so the dashboard and poller never POST the same single-use
+ * refresh_token simultaneously (which would error 20064 on the loser).
+ *
+ * `triedAccessToken` is the access token whose 401/expiry triggered this
+ * refresh. If, by the time we hold the mutex (or while waiting), the stored
+ * token has changed under us, we skip the network call and return the new
+ * stored token — someone else already refreshed and we can ride along.
+ */
+export async function refreshTokenSafe(
+  triedAccessToken: string,
+  env: FlightdeckEnv = readEnv()
+): Promise<StoredToken> {
+  const holder = `pid${process.pid}-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
+  const deadline = Date.now() + REFRESH_MUTEX_WAIT_MS;
+
+  // Acquire — busy-wait with a short poll. Cheap because contention is rare
+  // (only when both dashboard AND poller hit a 401 in the same cycle).
+  while (!acquireRefreshMutex(holder, REFRESH_MUTEX_TTL_MS)) {
+    const current = getToken();
+    if (current && current.accessToken !== triedAccessToken) {
+      // Another holder already refreshed; piggyback on their result.
+      return current;
+    }
+    if (Date.now() > deadline) {
+      throw new LarkAuthError(
+        "Timed out waiting for refresh mutex (held >60s)",
+        undefined,
+        false
+      );
+    }
+    await new Promise((r) => setTimeout(r, REFRESH_MUTEX_POLL_MS));
+  }
+
+  try {
+    const current = getToken();
+    if (!current) {
+      throw new LarkAuthError("Not signed in to Lark", undefined, true);
+    }
+    if (current.accessToken !== triedAccessToken) {
+      // Token rotated between our 401 and acquiring the mutex. Use the new one.
+      return current;
+    }
+    return await refreshToken(current.refreshToken, env);
+  } finally {
+    releaseRefreshMutex(holder);
+  }
 }
