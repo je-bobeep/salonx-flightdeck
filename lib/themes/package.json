@@ -1,0 +1,16 @@
+{
+  "name": "@flightdeck/themes",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    "./cluster": "./cluster.ts",
+    "./cache": "./cache.ts",
+    "./shapes": "./shapes.ts",
+    "./prompts/cluster-bd": "./prompts/cluster-bd.ts"
+  },
+  "dependencies": {
+    "@flightdeck/auth": "workspace:*",
+    "@flightdeck/claude": "workspace:*"
+  }
+}

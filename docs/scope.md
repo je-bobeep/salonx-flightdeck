@@ -269,3 +269,56 @@ In light of v1 being the dashboard:
 3. Decide the local SQLite schema (one row for the active token? what other state, if any?).
 4. Mock View 1 (Triage Queue) UI in the `prototype-design` skill before writing the data layer.
 5. Stand up the salonx-flightdeck repo (empty Next.js skeleton + README + `.gitignore` + `KILLSWITCH.md`) so future work has a home.
+
+---
+
+## v1 Scope Update — 2026-05-05: Pivot to thinking surface
+
+After Milestone 0 (OAuth + whoami) shipped, we re-litigated what flightdeck's *value* is and pivoted. The sections above are preserved as historical context; this section is what v1 actually builds.
+
+### What changed
+
+flightdeck is **not** a Lark Base re-skin. Lark Base remains the editing surface for routine field changes (Status, Priority, Sprint, Milestone). Trying to replicate that UI duplicates work that Lark already does well.
+
+flightdeck's value is the **thinking layer** that Lark Base can't be:
+1. Curated read-only views over BD Feedback + Feature Development that surface decisions, not just data.
+2. Cross-repo context surfacing — pull related PRDs (`salon-x-business`), code/PRs (`salon-x`), KB articles (`salonx-kb`) into a ticket panel, on demand.
+3. **Claude-driven scoping flows** — multi-turn conversations seeded with the right context that produce structured artifacts (dev-ticket drafts, BD↔Dev sanity verdicts, weekly stakeholder updates).
+
+### Write surface (narrowed)
+
+Original v1 plan: write Status / Priority / Sprint / Milestone / DuplexLink. Revised:
+
+- **Direct write**: BD↔Dev DuplexLink picker (typeahead). The picker is meaningfully better than Lark's UI; that's why it survives.
+- **Proposed writes via scoping flows**: Claude proposes a structured action (create Feature Dev row from BD scoping output; update BD Status to "Declined" with verdict text; etc.). User approves in the chat UI; only then does the write fire. Persisted in `proposed_actions` SQLite table with state machine.
+- **Dropped from v1**: inline Status/Priority/Sprint/Milestone edits; bulk edits; drag-to-reschedule (View 4 light write).
+
+### Scoping flows in v1
+
+Three flows. Each has a pre-seeded system prompt + sensible opener; conversation goes free-form after that.
+
+1. **`bd-to-dev`** — "Should this BD feedback become a dev ticket?" Output: `dev-ticket` SKILL-shaped draft (Background / Goal / Acceptance Criteria / Out of Scope / Reference) proposed as a `lark.create_dev_ticket` action.
+2. **`pair-sanity`** — given a BD↔Dev pair, is the dev work covering the ask? Output: verdict (covered / partial / drifted) with reasoning. May propose a `lark.update_bd_status` write.
+3. **`weekly-review`** — read the pipeline state, draft a stakeholder update. Output: a `propose.write_stakeholder_md` that writes `scoping-outputs/<YYYY-MM-DD>-stakeholder.md` (suffix on collision, never overwrite).
+
+Deferred: ready-to-ship checklist.
+
+### Cross-repo lookup
+
+Opt-in per session — there's a "Find related" button that triggers Claude to grep sibling repos (`salon-x`, `salon-x-business`, `salonx-kb`). Default is no auto-discovery. Mechanism is content-based (feature keywords), not ticket-id-based — verified that salon-x commits don't reference Lark ticket numbers.
+
+### View 5 reframed
+
+Originally an empty stub for future automations. Reframed as **Scoping Sessions** — local history of all sessions, filterable by flow type and ticket, click to resume.
+
+### Claude integration
+
+- **Default model**: Opus 4.7 (configurable per session).
+- **Auth**: shell out to `claude -p` (the Claude Code CLI) using the user's existing Claude Code subscription. No `ANTHROPIC_API_KEY` needed. Trade-off: prompt caching is harder to leverage across turns.
+- **Custom tools**: exposed via a local stdio MCP server (`lib/mcp-tools/`) that Claude Code spawns via `--mcp-config`. The MCP server hosts `lark.*`, `siblings.*`, and `propose.*` tools and shares the same SQLite database flightdeck uses for tokens.
+
+### Milestone state
+
+- ✅ Milestone 0 — Repo + OAuth + whoami (done).
+- ⬜ Phase A (this section's prerequisites: docs + schema). In progress.
+- ⬜ Phase B–I per the full implementation plan in `~/.claude/plans/invoke-the-planning-skill-atomic-narwhal.md`.

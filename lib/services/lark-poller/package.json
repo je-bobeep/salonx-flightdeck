@@ -1,0 +1,31 @@
+{
+  "name": "@flightdeck/poller",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "bin": {
+    "flightdeck-poller": "./bin.js"
+  },
+  "scripts": {
+    "start": "tsx run.ts --forever",
+    "once": "tsx run.ts --once"
+  },
+  "exports": {
+    "./poll": "./poll.ts",
+    "./classify": "./classify.ts",
+    "./state": "./state.ts",
+    "./config": "./config.ts"
+  },
+  "dependencies": {
+    "@flightdeck/auth": "workspace:*",
+    "@flightdeck/claude": "workspace:*",
+    "@flightdeck/lark": "workspace:*",
+    "better-sqlite3": "^11.5.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

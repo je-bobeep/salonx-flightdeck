@@ -1,0 +1,22 @@
+{
+  "name": "@flightdeck/lark",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    "./env": "./env.ts",
+    "./endpoints": "./endpoints.ts",
+    "./oauth": "./oauth.ts",
+    "./whoami": "./whoami.ts",
+    "./client": "./client.ts",
+    "./wiki": "./wiki.ts",
+    "./schemas": "./schemas.ts",
+    "./bitable": "./bitable.ts",
+    "./aging": "./aging.ts",
+    "./im": "./im.ts"
+  },
+  "dependencies": {
+    "@flightdeck/auth": "workspace:*",
+    "zod": "^3.24.0"
+  }
+}

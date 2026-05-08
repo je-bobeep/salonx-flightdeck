@@ -1,0 +1,20 @@
+{
+  "name": "@flightdeck/claude",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    "./runner": "./runner.ts",
+    "./mcp-config": "./mcp-config.ts",
+    "./paths": "./paths.ts",
+    "./process-pool": "./process-pool.ts",
+    "./team": "./team.ts",
+    "./prompts/bd-to-dev": "./prompts/bd-to-dev.ts",
+    "./prompts/pair-sanity": "./prompts/pair-sanity.ts",
+    "./prompts/weekly-review": "./prompts/weekly-review.ts",
+    "./prompts/classify-bd": "./prompts/classify-bd.ts"
+  },
+  "dependencies": {
+    "@flightdeck/mcp": "workspace:*"
+  }
+}

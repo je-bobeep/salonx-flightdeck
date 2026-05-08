@@ -1,0 +1,9 @@
+packages:
+  - "apps/*"
+  - "lib/lark"
+  - "lib/auth"
+  - "lib/sibling-repos"
+  - "lib/mcp-tools"
+  - "lib/claude"
+  - "lib/themes"
+  - "lib/services/lark-poller"

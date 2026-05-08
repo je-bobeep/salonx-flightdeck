@@ -13,6 +13,9 @@ node_modules/
 # local data — OAuth tokens, SQLite
 .data/
 
+# scoping artifacts — stakeholder updates etc, generated locally
+scoping-outputs/
+
 # Next.js
 .next/
 out/

@@ -1,0 +1,20 @@
+{
+  "name": "salonx-flightdeck",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "dev": "pnpm -F salonx-flightdeck-dashboard dev",
+    "build": "pnpm -F salonx-flightdeck-dashboard build",
+    "typecheck": "pnpm -r typecheck",
+    "poll": "pnpm -F @flightdeck/poller start",
+    "poll:once": "pnpm -F @flightdeck/poller once",
+    "check:lark-schema": "tsx scripts/check-lark-schema.mjs"
+  },
+  "engines": {
+    "node": ">=20.11"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0"
+  },
+  "packageManager": "pnpm@9.12.1"
+}

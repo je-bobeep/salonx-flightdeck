@@ -8,7 +8,10 @@ This is a deliberate pre-flight kill switch — it exists *before* the first wor
 
 | Workflow | Trigger | Home repo | Status | Last run | Notes |
 |---|---|---|---|---|---|
-| _none yet_ | — | — | — | — | The dashboard is not a workflow. Workflows land here as they ship per `docs/workflow-index.md`. |
+| `bd-scoping-flow` | User clicks "Scope this for dev" on a BD Feedback row in flightdeck | salonx-flightdeck | enabled | — | Drafts a Feature Development row from a BD row via Claude. Writes are propose-then-approve. |
+| `pair-sanity-flow` | User clicks "Sanity-check this pair" on a linked BD↔Dev pair in flightdeck | salonx-flightdeck | enabled | — | Verdict only (covered / partial / drifted). May propose `update_bd_status` writes. |
+| `weekly-review-flow` | User clicks "Draft this week's update" on the Pipeline view | salonx-flightdeck | enabled | — | Output is a Markdown file in `scoping-outputs/<YYYY-MM-DD>-stakeholder.md`. No Lark writes. |
+| `lark-bd-poller` | Background — every 15 min while `flightdeck-poller.service` is up on hubbibi | salonx-flightdeck | enabled | — | Reads new messages from Lark group chat `oc_545df3dd4bdb3b1f625ff88fbd3b9380`, classifies BD-shaped ones, writes BD Feedback rows directly. **Auto-fires** (no propose-then-approve in v1, since there is no human in the loop). Disable here to make the next cycle no-op without restarting the service. |
 
 ## How to use
 
@@ -22,3 +25,20 @@ This is a deliberate pre-flight kill switch — it exists *before* the first wor
 | Date | Workflow | Action | Reason |
 |---|---|---|---|
 | _none yet_ | — | — | — |
+
+## Stuck `proposed_actions` recovery
+
+If a row in `proposed_actions` is stuck in `state='firing'`, it means the approve route claimed the row but never transitioned it to `fired` / `failed` (process killed, route timed out, etc.). The composer stays disabled, the card shows a pulsing **firing…** badge, and clicking Approve again 409s.
+
+**Was the Lark write actually performed?** Inspect Lark Base directly. Two outcomes:
+
+- **Write didn't happen** → reset to `pending` so the user can re-approve:
+  ```bash
+  sqlite3 .data/tokens.db "UPDATE proposed_actions SET state='pending', resolved_at=NULL WHERE id='act_...';"
+  ```
+- **Write did happen** → mark `fired` so the UI clears the card:
+  ```bash
+  sqlite3 .data/tokens.db "UPDATE proposed_actions SET state='fired', resolved_at=$(date +%s)000 WHERE id='act_...';"
+  ```
+
+A future enhancement: add a "force resolve" admin button on `/sessions/<id>` so this doesn't require sqlite.

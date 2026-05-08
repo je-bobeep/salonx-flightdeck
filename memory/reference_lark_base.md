@@ -26,9 +26,9 @@ salonx-flightdeck calls the Lark Open API directly via `lib/lark/`, using a user
 
 ### Feature Development fields
 
-(Partial — confirm against `base:field:read` before writes.)
+Confirmed via Phase B roundtrip 2026-05-05 (28 fields total).
 
-`Description`, `Story description`, `Status` (SingleSelect), `Module` (MultiSelect), `Product` (MultiSelect), `Request Type` (SingleSelect: Bug / Feature Enhancement / New Feature / Tech), `Priority` (SingleSelect), `Milestone` (SingleSelect), `Sprint`, `Customer Feedback` (Checkbox), `BD Feedback` (DuplexLink → BD Feedback), `Assignee` (User), `Needs Translation Review` (Checkbox).
+`Description` (Text — plain string), `Story description` (Text — plain string), `Status` (SingleSelect), `Module` (MultiSelect), `Product` (MultiSelect), `Request Type` (SingleSelect: Bug / Feature Enhancement / New Feature / Tech), `Priority` (SingleSelect), `Milestone` (SingleSelect), `Sprint`, `Customer Feedback` (Checkbox), `BD Feedback` (DuplexLink → BD Feedback), `Assignee` (User), `Needs Translation Review` (Checkbox), `ETA`, `Release Date`, `Date Created`, `Created By` (User), `PRD`, `T-shirt Sizing`, `Must-have`, `Order`, `AI Summary`, `Attachment`, `Linked Record`, `Parent items`, `Growthbook FG Link`, `Is Growthbook Controlled`, `N/A`.
 
 ## API quirks
 
@@ -37,18 +37,24 @@ salonx-flightdeck calls the Lark Open API directly via `lib/lark/`, using a user
 - **Update records:** must pass `"query": { "ignore_consistency_check": true }` or the request fails with code `9499`.
 - **URL fields:** shape is `{ "link": "https://...", "text": "https://..." }`.
 - **DuplexLink fields on writes:** plain array of record IDs — `"BD Feedback": ["recvhGQlyRUnjF"]`. The `{ "link_record_ids": [...] }` shape that comes back in *read* responses is NOT accepted on writes — fails with code `1254074`.
-- **Description / Story description on Feature Dev:** rich-text fields. Pass as `[{"type": "text", "text": "..."}]`. Plain strings cause code `1254060` (TextFieldConvFail).
+- **Description / Story description on Feature Dev:** plain Multiline text — pass as plain strings. The rich-text array form `[{"type": "text", "text": "..."}]` returns code `1254060` (TextFieldConvFail). (This corrects an earlier note in this file. Authoritative source: `salon-x-business/.claude/skills/dev-ticket/SKILL.md`.)
 - **Refresh token rotation:** Lark refresh tokens are single-use. Persist the new one *before* using it. Treat code `20064` as "force re-auth," not retry.
 - **Console version publish:** after editing scopes in the developer console, click "Create version & publish" or scopes don't take effect for OAuth (error `99991672`).
 
-## Known team members (Assignee open_ids)
+## Known team members (Assignee open_ids — open.larksuite.com tenant)
 
-| Name | Email | open_id |
-|---|---|---|
-| Winney (Jingjing Feng) | winney.feng@storehub.com | `ou_51608c1bf8b218635550ac47967cd4e2` |
-| Yi Wang | yi.wang@storehub.com | `ou_a7a2283efe297e66f1d1e2c6647c75f5` |
-| Feida Zhang | feida.zhang@storehub.com | `ou_257d0781302b95b415c560e7ce93526b` |
-| Philly Cai | philly.cai@storehub.com | `ou_af82e2a3260db7119a6caed743d920f2` |
+⚠️ **These open_ids are scoped to the `open.larksuite.com` tenant** (the SalonX Phase 2 Tracker lives there). The same people have *different* open_ids in `open.feishu.cn`, so do NOT copy IDs from `salon-x-business/.claude/skills/` — those skills target feishu.cn and will fail here with `code=1254066 UserFieldConvFail`.
+
+Verified 2026-05-06 by reading the Assignee field on live Feature Development rows.
+
+| Name | open_id |
+|---|---|
+| Jingjing Feng (Winney) | `ou_08cf01cd3ec1f3790c2b88d7dc573fdf` |
+| Yi Wang | `ou_928341220770d0181c5cae0efd2a46b4` |
+| Feida Zhang | `ou_bb0a5e2f5e84f2fb68e53f556a07aef9` |
+| Philly Cai | `ou_fb3479ce4e9b2e98fcfdae0803379661` |
+| Jia En Chai | `ou_50c267dd36ca03ad02cca05eda7117c6` |
+| Kan Lu | `ou_433b91ac0b296b1fcecfd5441f554d66` |
 
 ## Why direct REST instead of MCP
 

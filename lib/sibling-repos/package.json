@@ -1,0 +1,15 @@
+{
+  "name": "@flightdeck/sibling",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    "./paths": "./paths.ts",
+    "./safety": "./safety.ts",
+    "./git": "./git.ts",
+    "./gh": "./gh.ts",
+    "./prds": "./prds.ts",
+    "./kb": "./kb.ts",
+    "./code-grep": "./code-grep.ts"
+  }
+}
