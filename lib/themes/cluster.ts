@@ -233,6 +233,7 @@ export async function clusterBd(opts: ClusterOptions): Promise<Theme[] | null> {
   // both present (English first).
   const promptRows = opts.rows.map((r) => ({
     record_id: r.recordId,
+    source: r.source,
     item: (r.translate || r.item).slice(0, 240),
     category: r.category,
     subCategory: r.subCategory ? r.subCategory.trim() : "",
@@ -436,6 +437,7 @@ export async function assignNewRows(
 
   const promptRows = opts.newRows.map((r) => ({
     record_id: r.recordId,
+    source: r.source,
     item: (r.translate || r.item).slice(0, 240),
     category: r.category,
     subCategory: r.subCategory ? r.subCategory.trim() : "",

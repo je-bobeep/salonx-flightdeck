@@ -7,7 +7,6 @@ import {
   assignNewRows,
   clusterBd,
   extractNewThemeNames,
-  type BdInputRow,
   type FeedbackInputRow,
 } from "@flightdeck/themes/cluster";
 import {
@@ -66,7 +65,7 @@ function projectDevForCluster(rows: DevRow[]): FeedbackInputRow[] {
   }));
 }
 
-function projectInputs(rows: ReturnType<typeof projectBd>[]): BdInputRow[] {
+function projectInputs(rows: ReturnType<typeof projectBd>[]): FeedbackInputRow[] {
   return rows.map((r) => ({
     recordId: r.recordId,
     source: "bd" as const,
@@ -300,7 +299,7 @@ function buildMemberCountMap(themes: Theme[]): Record<string, number> {
 }
 
 async function computeFromScratch(
-  inputs: BdInputRow[]
+  inputs: FeedbackInputRow[]
 ): Promise<{ themes: Theme[]; mode: "claude" | "unavailable" }> {
   // Gate `previousThemes` on the prior blob's mode. If the last good blob was
   // a fallback (Sub-category bucketing) or unavailable (no themes), we MUST
@@ -348,7 +347,7 @@ async function computeFromScratch(
 }
 
 async function computeIncremental(
-  inputs: BdInputRow[],
+  inputs: FeedbackInputRow[],
   prevBlob: ThemesBlob
 ): Promise<{
   themes: Theme[];
@@ -358,7 +357,7 @@ async function computeIncremental(
    * provenance for the Phase 4 drift signal — >0 forces from-scratch next time. */
   newThemeCount: number;
 }> {
-  const byId = new Map<string, BdInputRow>();
+  const byId = new Map<string, FeedbackInputRow>();
   for (const r of inputs) byId.set(r.recordId, r);
 
   const existingAssignedIds = new Set<string>();
@@ -374,6 +373,7 @@ async function computeIncremental(
     const themesPruned = prevBlob.themes.map((t) => ({
       ...t,
       bdRecordIds: t.bdRecordIds.filter((id) => byId.has(id)),
+      devRecordIds: t.devRecordIds.filter((id) => byId.has(id)),
     }));
     return {
       themes: recomputeMetrics(themesPruned, byId),
