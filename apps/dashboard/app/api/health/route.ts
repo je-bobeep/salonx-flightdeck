@@ -38,6 +38,12 @@ type Health = {
       failed: number;
     };
   };
+  cluster: {
+    lastRunAt: number | null;
+    lastRunMsAgo: number | null;
+    lastRunMode: string | null;
+    lastRunError: string | null;
+  };
 };
 
 const startedAt = Date.now();
@@ -59,6 +65,7 @@ export async function GET() {
     token: { present: false, accessExpiresInMs: null, refreshExpiresInMs: null },
     sessions: { active: 0 },
     poller: { chats: [], recent24h: { ingested: 0, failed: 0 } },
+    cluster: { lastRunAt: null, lastRunMsAgo: null, lastRunMode: null, lastRunError: null },
   };
 
   // Read-only — open in readonly mode so we don't accidentally trigger schema
@@ -122,6 +129,22 @@ export async function GET() {
       .get(now - day) as { c: number };
     out.poller.recent24h.ingested = ingested.c;
     out.poller.recent24h.failed = failed.c;
+
+    // Most-recent cluster outcome across all poller_state rows.
+    const clusterRow = db
+      .prepare(
+        "SELECT last_cluster_at, last_cluster_mode, last_cluster_error FROM poller_state WHERE last_cluster_at IS NOT NULL ORDER BY last_cluster_at DESC LIMIT 1"
+      )
+      .get() as
+      | { last_cluster_at: number; last_cluster_mode: string | null; last_cluster_error: string | null }
+      | undefined;
+
+    out.cluster = {
+      lastRunAt: clusterRow?.last_cluster_at ?? null,
+      lastRunMsAgo: clusterRow?.last_cluster_at ? now - clusterRow.last_cluster_at : null,
+      lastRunMode: clusterRow?.last_cluster_mode ?? null,
+      lastRunError: clusterRow?.last_cluster_error ?? null,
+    };
   } finally {
     db.close();
   }
