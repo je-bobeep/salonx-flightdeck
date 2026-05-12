@@ -224,7 +224,7 @@ export async function clusterBd(opts: ClusterOptions): Promise<Theme[] | null> {
     const result = await runClaudeOneShot({
       systemPrompt,
       userMessage,
-      model: opts.model ?? "sonnet",
+      model: opts.model ?? "opus",
       abortSignal: opts.abortSignal,
       disableMcp: true,
     });
@@ -409,7 +409,7 @@ export async function assignNewRows(
     const result = await runClaudeOneShot({
       systemPrompt,
       userMessage,
-      model: opts.model ?? "sonnet",
+      model: opts.model ?? "opus",
       abortSignal: opts.abortSignal,
       disableMcp: true,
     });

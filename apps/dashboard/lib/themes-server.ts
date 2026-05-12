@@ -311,7 +311,7 @@ async function computeIncremental(
       // "[Kanzashi] Show cancellation reason" even if the existing Kanzashi
       // theme was named semantically by the prior from-scratch run.
       rowLookup: byId,
-      model: "sonnet",
+      model: "opus",
       abortSignal: ac.signal,
     });
   } catch (err) {
