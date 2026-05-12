@@ -8,7 +8,15 @@ import { Button } from "@/components/ui/button";
 import { AgingBadges } from "./AgingBadge";
 import { HeadlineNumber } from "./HeadlineNumber";
 import { RisingBadge } from "./RisingBadge";
-import { ArrowRight, ChevronDown, ChevronRight, Wand2 } from "lucide-react";
+import {
+  AlertCircle,
+  ArrowRight,
+  ArrowUpRight,
+  ChevronDown,
+  ChevronRight,
+  Link2,
+  Wand2,
+} from "lucide-react";
 import type {
   BdRow,
   CoverageEntry,
@@ -92,16 +100,37 @@ export function LinkageView() {
             </p>
           )
         ) : (
-          <ul className="divide-y divide-neutral-100">
-            {data.coverage.map((c) => (
-              <CoverageCard
-                key={c.theme.id}
-                entry={c}
-                bdById={data.bdById}
-                pushDev={data.orphanDevByTheme?.[c.theme.id] ?? []}
-              />
-            ))}
-          </ul>
+          <>
+            <div className="flex items-center gap-3 border-b border-neutral-100 px-4 py-1.5 text-[11px] text-neutral-500">
+              <span className="flex items-center gap-1">
+                <Link2 className="h-3 w-3 text-blue-500" />
+                <span className="text-blue-700">Pull</span>
+                <span>(linked)</span>
+              </span>
+              <span className="text-neutral-300">·</span>
+              <span className="flex items-center gap-1">
+                <AlertCircle className="h-3 w-3 text-amber-500" />
+                <span className="text-amber-700">Uncovered</span>
+                <span>(BD waiting)</span>
+              </span>
+              <span className="text-neutral-300">·</span>
+              <span className="flex items-center gap-1">
+                <ArrowUpRight className="h-3 w-3 text-slate-500" />
+                <span className="text-slate-700">Push</span>
+                <span>(strategy / tech-debt)</span>
+              </span>
+            </div>
+            <ul className="divide-y divide-neutral-100">
+              {data.coverage.map((c) => (
+                <CoverageCard
+                  key={c.theme.id}
+                  entry={c}
+                  bdById={data.bdById}
+                  pushDev={data.orphanDevByTheme?.[c.theme.id] ?? []}
+                />
+              ))}
+            </ul>
+          </>
         )}
       </Section>
 
@@ -258,10 +287,17 @@ function CoverageCard({
         <div className="mt-3 ml-7 grid gap-3 text-sm">
           {entry.devTickets.length > 0 ? (
             <div>
-              <h4 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
-                Linked Dev tickets
+              <h4 className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-blue-700">
+                <Link2 className="h-3.5 w-3.5" />
+                <span>Pull</span>
+                <span className="font-normal normal-case tracking-normal text-neutral-500">
+                  · Dev work serving this theme
+                </span>
+                <span className="ml-auto font-mono text-neutral-500">
+                  {entry.devTickets.length}
+                </span>
               </h4>
-              <ul className="divide-y divide-neutral-100 rounded-md border border-neutral-200">
+              <ul className="divide-y divide-neutral-100 rounded-md border border-neutral-200 border-l-2 border-l-blue-300">
                 {entry.devTickets.map((d) => (
                   <CoverageDevRow key={d.recordId} ticket={d} />
                 ))}
@@ -274,10 +310,17 @@ function CoverageCard({
           )}
           {entry.uncoveredBdIds.length > 0 ? (
             <div>
-              <h4 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
-                Uncovered BD rows ({entry.uncoveredBdIds.length})
+              <h4 className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700">
+                <AlertCircle className="h-3.5 w-3.5" />
+                <span>Uncovered</span>
+                <span className="font-normal normal-case tracking-normal text-neutral-500">
+                  · BD asks with no Dev work yet
+                </span>
+                <span className="ml-auto font-mono text-neutral-500">
+                  {entry.uncoveredBdIds.length}
+                </span>
               </h4>
-              <ul className="divide-y divide-neutral-100 rounded-md border border-neutral-200">
+              <ul className="divide-y divide-neutral-100 rounded-md border border-neutral-200 border-l-2 border-l-amber-300">
                 {entry.uncoveredBdIds.map((id) => {
                   const bd = bdById[id];
                   if (!bd) return null;
@@ -288,10 +331,17 @@ function CoverageCard({
           ) : null}
           {pushDev.length > 0 ? (
             <div>
-              <h4 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
-                Push (no BD link) ({pushDev.length})
+              <h4 className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-700">
+                <ArrowUpRight className="h-3.5 w-3.5" />
+                <span>Push</span>
+                <span className="font-normal normal-case tracking-normal text-neutral-500">
+                  · Dev work without BD anchor (strategy / tech-debt)
+                </span>
+                <span className="ml-auto font-mono text-neutral-500">
+                  {pushDev.length}
+                </span>
               </h4>
-              <ul className="divide-y divide-neutral-100 rounded-md border border-neutral-200">
+              <ul className="divide-y divide-neutral-100 rounded-md border border-neutral-200 border-l-2 border-l-slate-300">
                 {pushDev.map((d) => (
                   <CoveragePushDevRow key={d.recordId} dev={d} />
                 ))}
