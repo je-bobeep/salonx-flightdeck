@@ -11,6 +11,7 @@
 
 import { POLLER_CONFIG } from "./config";
 import { pollOnce } from "./poll";
+import { runClusterStep } from "./cluster-step";
 
 function tsLog(s: string) {
   process.stdout.write(`${new Date().toISOString()} ${s}\n`);
@@ -20,6 +21,12 @@ async function runOnce() {
   const summary = await pollOnce({ log: tsLog });
   tsLog(
     `[poller] done — fetched=${summary.fetched} ingested=${summary.ingested} skipped=${summary.skipped} failed=${summary.failed} (${summary.finishedAt - summary.startedAt}ms)`
+  );
+
+  // Cluster step. Never throws; logs + persists its own outcome.
+  const clusterResult = await runClusterStep({ log: tsLog });
+  tsLog(
+    `[poller] cluster done — mode=${clusterResult.mode} themes=${clusterResult.themesCount} newThemes=${clusterResult.newThemes}`
   );
 }
 
