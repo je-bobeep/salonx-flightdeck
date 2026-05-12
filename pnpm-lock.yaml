@@ -32,6 +32,9 @@ importers:
       '@flightdeck/themes':
         specifier: workspace:*
         version: link:../../lib/themes
+      '@flightdeck/themes-server':
+        specifier: workspace:*
+        version: link:../../lib/themes-server
       '@radix-ui/react-dialog':
         specifier: ^1.1.15
         version: 1.1.15(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
