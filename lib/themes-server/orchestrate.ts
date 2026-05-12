@@ -419,11 +419,14 @@ async function computeIncremental(
   }));
   const themeIndex = new Map(merged.map((t) => [t.id, t]));
 
-  for (const [themeId, ids] of assignResult.additions) {
+  for (const [themeId, slot] of assignResult.additions) {
     const target = themeIndex.get(themeId);
     if (!target) continue;
-    for (const id of ids) {
+    for (const id of slot.bd) {
       if (!target.bdRecordIds.includes(id)) target.bdRecordIds.push(id);
+    }
+    for (const id of slot.dev) {
+      if (!target.devRecordIds.includes(id)) target.devRecordIds.push(id);
     }
   }
 
@@ -435,18 +438,21 @@ async function computeIncremental(
       // Treat as additions to the existing theme rather than minting a dup.
       const target = themeIndex.get(collision);
       if (target) {
-        for (const id of nt.bdRecordIds) {
+        for (const id of nt.bdMembers) {
           if (!target.bdRecordIds.includes(id)) target.bdRecordIds.push(id);
+        }
+        for (const id of nt.devMembers) {
+          if (!target.devRecordIds.includes(id)) target.devRecordIds.push(id);
         }
       }
       continue;
     }
     const newTheme: Theme = {
-      id: `${slug}-${shortHash(nt.bdRecordIds)}`,
+      id: `${slug}-${shortHash([...nt.bdMembers, ...nt.devMembers])}`,
       name: nt.name,
       description: nt.description,
-      bdRecordIds: [...new Set(nt.bdRecordIds)],
-      devRecordIds: [],
+      bdRecordIds: [...new Set(nt.bdMembers)],
+      devRecordIds: [...new Set(nt.devMembers)],
       dominantCategories: [],
       dominantSubCategories: [],
       bdVolume: 0,

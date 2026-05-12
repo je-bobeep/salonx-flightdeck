@@ -69,25 +69,27 @@ export type IncrementalAssignOptions = {
 };
 
 type AssignClaudeOutput = {
-  assignments?: { record_id?: unknown; theme_id?: unknown }[];
+  assignments?: { record_id?: unknown; source?: unknown; theme_id?: unknown }[];
   newThemes?: {
     tempId?: unknown;
     name?: unknown;
     description?: unknown;
-    bdRecordIds?: unknown;
+    members?: unknown;
   }[];
 };
 
 /** Result shape for an incremental assign call. The caller merges these
  * into the existing themes and recomputes metrics over the merged set. */
 export type IncrementalAssignResult = {
-  /** existing-theme membership additions: theme_id -> [bd_record_id...] */
-  additions: Map<string, string[]>;
+  /** existing-theme membership additions, separated by source.
+   *  Maps theme_id -> { bd: [...], dev: [...] }. */
+  additions: Map<string, { bd: string[]; dev: string[] }>;
   newThemes: Array<{
     tempId: string;
     name: string;
     description: string;
-    bdRecordIds: string[];
+    bdMembers: string[];
+    devMembers: string[];
   }>;
   /** Rows the model failed to place (no assignment, no newTheme). The caller
    * decides what to do — typically falls them back into a "from-scratch" run. */
@@ -322,23 +324,27 @@ export function extractNewThemeNames(themes: Theme[]): string[] {
  */
 function parseAssignOutput(
   out: AssignClaudeOutput,
-  validRecordIds: Set<string>,
+  validBdIds: Set<string>,
+  validDevIds: Set<string>,
   validThemeIds: Set<string>
 ): IncrementalAssignResult {
   const placed = new Set<string>();
+  const additions = new Map<string, { bd: string[]; dev: string[] }>();
 
-  const additions = new Map<string, string[]>();
   for (const a of out.assignments ?? []) {
     const recordId = typeof a.record_id === "string" ? a.record_id : null;
+    const source = a.source === "dev" ? "dev" : a.source === "bd" ? "bd" : null;
     const themeId = typeof a.theme_id === "string" ? a.theme_id : null;
-    if (!recordId || !themeId) continue;
-    if (!validRecordIds.has(recordId)) continue;
+    if (!recordId || !themeId || !source) continue;
+    if (source === "bd" && !validBdIds.has(recordId)) continue;
+    if (source === "dev" && !validDevIds.has(recordId)) continue;
     if (!validThemeIds.has(themeId)) continue;
     if (placed.has(recordId)) continue;
     placed.add(recordId);
-    const arr = additions.get(themeId) ?? [];
-    arr.push(recordId);
-    additions.set(themeId, arr);
+    const slot = additions.get(themeId) ?? { bd: [], dev: [] };
+    if (source === "bd") slot.bd.push(recordId);
+    else slot.dev.push(recordId);
+    additions.set(themeId, slot);
   }
 
   const newThemes: IncrementalAssignResult["newThemes"] = [];
@@ -347,18 +353,36 @@ function parseAssignOutput(
     const name = typeof raw.name === "string" ? raw.name.trim() : "";
     const description =
       typeof raw.description === "string" ? raw.description.trim() : "";
-    const ids = Array.isArray(raw.bdRecordIds)
-      ? raw.bdRecordIds.filter(
-          (s): s is string =>
-            typeof s === "string" && validRecordIds.has(s) && !placed.has(s)
-        )
-      : [];
-    if (!name || ids.length === 0) continue;
-    for (const id of ids) placed.add(id);
-    newThemes.push({ tempId, name, description, bdRecordIds: [...new Set(ids)] });
+    const members = Array.isArray(raw.members) ? raw.members : [];
+
+    const bdMembers: string[] = [];
+    const devMembers: string[] = [];
+    for (const m of members) {
+      if (!m || typeof m !== "object") continue;
+      const mObj = m as { id?: unknown; source?: unknown };
+      const id = typeof mObj.id === "string" ? mObj.id : null;
+      const src = mObj.source === "dev" ? "dev" : mObj.source === "bd" ? "bd" : null;
+      if (!id || !src) continue;
+      if (placed.has(id)) continue;
+      if (src === "bd" && !validBdIds.has(id)) continue;
+      if (src === "dev" && !validDevIds.has(id)) continue;
+      placed.add(id);
+      if (src === "bd") bdMembers.push(id);
+      else devMembers.push(id);
+    }
+
+    if (!name || (bdMembers.length === 0 && devMembers.length === 0)) continue;
+    newThemes.push({
+      tempId,
+      name,
+      description,
+      bdMembers: [...new Set(bdMembers)],
+      devMembers: [...new Set(devMembers)],
+    });
   }
 
-  const unplaced = [...validRecordIds].filter((id) => !placed.has(id));
+  const allValid = new Set<string>([...validBdIds, ...validDevIds]);
+  const unplaced = [...allValid].filter((id) => !placed.has(id));
   return { additions, newThemes, unplaced };
 }
 
@@ -419,7 +443,8 @@ export async function assignNewRows(
     ageDays: r.ageDays,
   }));
   const userMessage = JSON.stringify(promptRows);
-  const validRecordIds = new Set(opts.newRows.map((r) => r.recordId));
+  const validBdIds = new Set(opts.newRows.filter((r) => r.source === "bd").map((r) => r.recordId));
+  const validDevIds = new Set(opts.newRows.filter((r) => r.source === "dev").map((r) => r.recordId));
   const validThemeIds = new Set(opts.existingThemes.map((t) => t.id));
 
   async function runOnce(
@@ -445,7 +470,8 @@ export async function assignNewRows(
     }
     return parseAssignOutput(
       result.json as AssignClaudeOutput,
-      validRecordIds,
+      validBdIds,
+      validDevIds,
       validThemeIds
     );
   }
