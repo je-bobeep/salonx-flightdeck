@@ -28,6 +28,9 @@ export type PollerState = {
   lastRunAt: number | null;
   lastRunProcessed: number | null;
   lastRunError: string | null;
+  lastClusterAt: number | null;
+  lastClusterMode: string | null;
+  lastClusterError: string | null;
   updatedAt: number;
 };
 
@@ -35,7 +38,8 @@ export function getPollerState(chatId: string): PollerState | null {
   const row = db()
     .prepare(
       `SELECT chat_id, last_seen_create_ms, last_seen_message_id, last_run_at,
-              last_run_processed, last_run_error, updated_at
+              last_run_processed, last_run_error, last_cluster_at,
+              last_cluster_mode, last_cluster_error, updated_at
        FROM poller_state WHERE chat_id = ?`
     )
     .get(chatId) as
@@ -46,6 +50,9 @@ export function getPollerState(chatId: string): PollerState | null {
         last_run_at: number | null;
         last_run_processed: number | null;
         last_run_error: string | null;
+        last_cluster_at: number | null;
+        last_cluster_mode: string | null;
+        last_cluster_error: string | null;
         updated_at: number;
       }
     | undefined;
@@ -57,8 +64,23 @@ export function getPollerState(chatId: string): PollerState | null {
     lastRunAt: row.last_run_at,
     lastRunProcessed: row.last_run_processed,
     lastRunError: row.last_run_error,
+    lastClusterAt: row.last_cluster_at,
+    lastClusterMode: row.last_cluster_mode,
+    lastClusterError: row.last_cluster_error,
     updatedAt: row.updated_at,
   };
+}
+
+export function updateClusterState(args: {
+  chatId: string;
+  mode: string;
+  error: string | null;
+}): void {
+  db()
+    .prepare(
+      "UPDATE poller_state SET last_cluster_at = ?, last_cluster_mode = ?, last_cluster_error = ? WHERE chat_id = ?"
+    )
+    .run(Date.now(), args.mode, args.error, args.chatId);
 }
 
 export function upsertPollerState(input: {

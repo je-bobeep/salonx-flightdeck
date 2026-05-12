@@ -22,7 +22,7 @@ const DB_PATH = process.env.FLIGHTDECK_DB_PATH
 
 let db: Database.Database | null = null;
 
-function getDb(): Database.Database {
+export function getDb(): Database.Database {
   if (db) return db;
   fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
   db = new Database(DB_PATH);
@@ -201,7 +201,29 @@ function getDb(): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_scoping_telemetry_started
       ON scoping_telemetry(started_at DESC);
+
+    CREATE TABLE IF NOT EXISTS cluster_mutex (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      holder TEXT NOT NULL,
+      acquired_at INTEGER NOT NULL
+    );
   `);
+
+  // Idempotent column additions on poller_state. SQLite ALTER TABLE ADD COLUMN
+  // errors if the column exists, so guard with PRAGMA table_info.
+  const pollerCols = db
+    .prepare("PRAGMA table_info(poller_state)")
+    .all() as { name: string }[];
+  const pollerColNames = new Set(pollerCols.map((c) => c.name));
+  if (!pollerColNames.has("last_cluster_at")) {
+    db.exec("ALTER TABLE poller_state ADD COLUMN last_cluster_at INTEGER");
+  }
+  if (!pollerColNames.has("last_cluster_error")) {
+    db.exec("ALTER TABLE poller_state ADD COLUMN last_cluster_error TEXT");
+  }
+  if (!pollerColNames.has("last_cluster_mode")) {
+    db.exec("ALTER TABLE poller_state ADD COLUMN last_cluster_mode TEXT");
+  }
 
   // Forward-compatible migrations. CREATE TABLE IF NOT EXISTS only fires the
   // first time, so once the table exists we have to ALTER manually for new
