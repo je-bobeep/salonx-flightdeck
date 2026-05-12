@@ -99,6 +99,7 @@ type ClaudeOutput = {
     name?: unknown;
     description?: unknown;
     bdRecordIds?: unknown;
+    devRecordIds?: unknown;
     dominantCategories?: unknown;
     dominantSubCategories?: unknown;
   }[];
@@ -113,7 +114,7 @@ type ClaudeOutput = {
  */
 function parseClaudeThemes(
   out: ClaudeOutput,
-  byId: Map<string, BdInputRow>,
+  byId: Map<string, FeedbackInputRow>,
   previousThemes: ClusterOptions["previousThemes"]
 ): Theme[] | null {
   if (!Array.isArray(out.themes)) {
@@ -124,6 +125,14 @@ function parseClaudeThemes(
     return null;
   }
 
+  const validBdIds = new Set<string>();
+  const validDevIds = new Set<string>();
+  for (const [id, row] of byId) {
+    if (row.source === "bd") validBdIds.add(id);
+    else validDevIds.add(id);
+  }
+
+  const seenAcrossThemes = new Set<string>();
   const now = Date.now();
   const themes: Theme[] = [];
 
@@ -131,11 +140,20 @@ function parseClaudeThemes(
     const name = typeof raw.name === "string" ? raw.name.trim() : "";
     const description =
       typeof raw.description === "string" ? raw.description.trim() : "";
+
     const bdRecordIdsRaw = Array.isArray(raw.bdRecordIds)
       ? raw.bdRecordIds.filter(
-          (s): s is string => typeof s === "string" && byId.has(s)
+          (s): s is string =>
+            typeof s === "string" && validBdIds.has(s) && !seenAcrossThemes.has(s)
         )
       : [];
+    const devRecordIdsRaw = Array.isArray(raw.devRecordIds)
+      ? raw.devRecordIds.filter(
+          (s): s is string =>
+            typeof s === "string" && validDevIds.has(s) && !seenAcrossThemes.has(s)
+        )
+      : [];
+
     const dominantCategories = Array.isArray(raw.dominantCategories)
       ? raw.dominantCategories.filter((s): s is string => typeof s === "string")
       : [];
@@ -145,19 +163,16 @@ function parseClaudeThemes(
         )
       : [];
 
-    if (!name || bdRecordIdsRaw.length === 0) continue;
+    if (!name || (bdRecordIdsRaw.length === 0 && devRecordIdsRaw.length === 0)) {
+      continue;
+    }
 
-    // Dedup
     const bdRecordIds = [...new Set(bdRecordIdsRaw)];
+    const devRecordIds = [...new Set(devRecordIdsRaw)];
+    for (const id of bdRecordIds) seenAcrossThemes.add(id);
+    for (const id of devRecordIds) seenAcrossThemes.add(id);
 
-    // Joined Dev members
-    const devRecordIds = [
-      ...new Set(
-        bdRecordIds.flatMap((id) => byId.get(id)?.linkedDevIds ?? [])
-      ),
-    ];
-
-    // Median age days (skip rows with null age)
+    // Median age days: BD only (Dev ageDays not reliable).
     const ages = bdRecordIds
       .map((id) => byId.get(id)?.ageDays)
       .filter((v): v is number => typeof v === "number")
@@ -165,17 +180,20 @@ function parseClaudeThemes(
     const bdMedianAgeDays =
       ages.length === 0 ? null : ages[Math.floor(ages.length / 2)];
 
-    // Rising: ≥3 members with dateCreatedMs in last 14 days
-    const newCount = bdRecordIds.reduce((acc, id) => {
+    // Rising: ≥3 BD-or-Dev members with dateCreatedMs in the last 14 days.
+    const allMemberIds = [...bdRecordIds, ...devRecordIds];
+    const newCount = allMemberIds.reduce((acc, id) => {
       const ms = byId.get(id)?.dateCreatedMs;
       if (typeof ms === "number" && now - ms < 14 * DAY_MS) return acc + 1;
       return acc;
     }, 0);
     const rising = newCount >= 3;
 
-    // Stable id: candidate names use slugify(name) directly; ad-hoc names
-    // fall back to the overlap heuristic + hash.
-    const id = pickStableId(bdRecordIds, name, previousThemes);
+    const id = pickStableId(
+      [...bdRecordIds, ...devRecordIds],
+      name,
+      previousThemes
+    );
 
     themes.push({
       id,
