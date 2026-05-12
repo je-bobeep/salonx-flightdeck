@@ -4,7 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "exports": {
-    "./db": "./db.ts"
+    "./db": "./db.ts",
+    "./cluster-mutex": "./cluster-mutex.ts"
   },
   "dependencies": {
     "better-sqlite3": "^11.5.0"
