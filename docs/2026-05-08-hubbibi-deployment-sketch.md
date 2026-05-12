@@ -89,6 +89,9 @@ LARK_APP_ID=...                       # same values as your local .env.local
 LARK_APP_SECRET=...
 NEXTAUTH_SECRET=<fresh 32-byte random> # NOT the same as your laptop — independent cookie sessions
 NEXTAUTH_URL=https://flightdeck.hubbibi.online       # see "Exposure" below
+# NOTE 2026-05-12: domain is no longer active. NEXTAUTH_URL on hubbibi
+# currently points at http://100.113.34.13:3002 instead (verify on the
+# server's .env.local). See the "Exposure" section.
 PORT=3002
 
 FLIGHTDECK_REPO_ROOT=/srv/flightdeck/repos           # already wired in code
@@ -182,7 +185,9 @@ The poller is a separate unit (not a worker inside the dashboard process) so it 
 
 The KILLSWITCH.md `lark-bd-poller` row gives a *no-restart* abort path: flip its Status to `disabled`, the next cycle no-ops without bouncing the service.
 
-## Exposure: Cloudflare Tunnel
+## Exposure (current: Tailscale-only)
+
+> **Current state (as of 2026-05-12):** The Cloudflare Tunnel route `flightdeck.hubbibi.online` is no longer active. Access is via Tailscale only — `http://100.113.34.13:3002` from any device on the tailnet. The section below describes how the tunnel was originally set up; revive only if you need public reach again.
 
 Decided 2026-05-08, replacing the original "tailnet-only via `tailscale serve`" plan. Reason: hubbibi's tailscale runs inside a Docker container (`tailscale/tailscale` image), so the host has no `tailscale` CLI. `tailscale serve` is unavailable.
 
@@ -221,7 +226,7 @@ Trade-offs vs the original tailnet-only plan:
 
 ## Lark Developer Console
 
-Add a second OAuth redirect URI: `https://flightdeck.hubbibi.online/auth/lark/callback`. Keep the localhost one for laptop dev. Lark allows multiple.
+Add a second OAuth redirect URI: `https://flightdeck.hubbibi.online/auth/lark/callback`. Keep the localhost one for laptop dev. Lark allows multiple. (Note 2026-05-12: with the Cloudflare tunnel decommissioned, only the localhost + IP-based redirect URIs are currently in use.)
 
 (Path comes from `lib/lark/env.ts` `REDIRECT_PATH` — verify before adding.)
 
