@@ -173,31 +173,16 @@ function pickThemeForDev(
       if (recovered) return recovered;
     }
   }
-  // A Dev ticket belongs to a theme ONLY via authoritative cross-references:
-  //   (a) the Dev's record_id is in theme.devRecordIds — i.e. the cluster
-  //       reached this Dev by joining a BD member's linkedDevIds.
-  //   (b) any of the Dev's bdLinkIds is a member of the theme's bdRecordIds.
-  // We previously had a third "fuzzy" rule that matched the Dev's
-  // module/product strings against theme.dominantCategories on substring
-  // overlap. That was too loose: themes with `dominantCategories=["Booking"]`
-  // swallowed any Dev row containing "Booking" in its module — a "POS thank-
-  // you screen" ticket and a "Bookings cancellation datetime" ticket were
-  // both attributed to "Set Menu Booking". Push tickets that legitimately
-  // have no BD link land in the unthemed bucket below — that grouping (by
-  // module/milestone) is the correct home for them.
-  const linkedBdSet = new Set(dev.bdLinkIds);
-  let best: { theme: Theme; score: number } | null = null;
+  // Direct membership only: under unified clustering (Phase 2+), Claude
+  // assigns Dev rows to themes by content, so theme.devRecordIds is the
+  // authoritative source for Dev membership. The legacy BD-link transitive
+  // rule is dropped — push tickets that legitimately have no BD link are
+  // now first-class theme members rather than landing in the unthemed
+  // module/milestone bucket below.
   for (const t of themes) {
-    let score = 0;
-    if (t.devRecordIds.includes(dev.recordId)) score += 5;
-    for (const bdId of t.bdRecordIds) {
-      if (linkedBdSet.has(bdId)) score += 1;
-    }
-    if (score > 0 && (!best || score > best.score)) {
-      best = { theme: t, score };
-    }
+    if (t.devRecordIds.includes(dev.recordId)) return t;
   }
-  return best?.theme ?? null;
+  return null;
 }
 
 /** Pick a non-theme grouping label for an unthemed Dev ticket so the "Now"
