@@ -213,6 +213,21 @@ importers:
         specifier: workspace:*
         version: link:../claude
 
+  lib/themes-server:
+    dependencies:
+      '@flightdeck/auth':
+        specifier: workspace:*
+        version: link:../auth
+      '@flightdeck/claude':
+        specifier: workspace:*
+        version: link:../claude
+      '@flightdeck/lark':
+        specifier: workspace:*
+        version: link:../lark
+      '@flightdeck/themes':
+        specifier: workspace:*
+        version: link:../themes
+
 packages:
 
   '@alloc/quick-lru@5.2.0':

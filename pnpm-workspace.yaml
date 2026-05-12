@@ -6,4 +6,5 @@ packages:
   - "lib/mcp-tools"
   - "lib/claude"
   - "lib/themes"
+  - "lib/themes-server"
   - "lib/services/lark-poller"

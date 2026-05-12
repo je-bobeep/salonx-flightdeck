@@ -1,0 +1,16 @@
+{
+  "name": "@flightdeck/themes-server",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    "./orchestrate": "./orchestrate.ts",
+    "./fetch": "./fetch.ts"
+  },
+  "dependencies": {
+    "@flightdeck/auth": "workspace:*",
+    "@flightdeck/claude": "workspace:*",
+    "@flightdeck/lark": "workspace:*",
+    "@flightdeck/themes": "workspace:*"
+  }
+}
