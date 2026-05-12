@@ -14,13 +14,8 @@ import {
   writeThemesCache,
 } from "@flightdeck/themes/cache";
 import type { Theme, ThemesBlob } from "@flightdeck/themes/shapes";
-// TEMP: until Task 0.4 reshuffles overrides/proposals helpers into this package.
-function listRowOverrides(): Map<string, { themeId: string; themeName?: string }> {
-  return new Map();
-}
-function recordProposals(_names: string[], _counts: Record<string, number>): void {
-  // no-op until Task 0.4
-}
+import { listRowOverrides } from "./theme-overrides-db";
+import { recordProposals } from "./taxonomy-proposals-db";
 
 export type ThemesFetchResult = {
   blob: ThemesBlob;

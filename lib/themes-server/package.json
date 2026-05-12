@@ -5,12 +5,18 @@
   "type": "module",
   "exports": {
     "./orchestrate": "./orchestrate.ts",
-    "./fetch": "./fetch.ts"
+    "./fetch": "./fetch.ts",
+    "./theme-overrides-db": "./theme-overrides-db.ts",
+    "./taxonomy-proposals-db": "./taxonomy-proposals-db.ts"
   },
   "dependencies": {
     "@flightdeck/auth": "workspace:*",
     "@flightdeck/claude": "workspace:*",
     "@flightdeck/lark": "workspace:*",
-    "@flightdeck/themes": "workspace:*"
+    "@flightdeck/themes": "workspace:*",
+    "better-sqlite3": "^11.5.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12"
   }
 }
