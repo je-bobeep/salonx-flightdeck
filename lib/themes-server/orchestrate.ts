@@ -243,6 +243,10 @@ function recomputeMetrics(themes: Theme[], byId: Map<string, FeedbackInputRow>):
  * missing from the new themes BUT a current theme has a slug-matching name
  * to the override's saved theme_name, redirect the override to that theme.
  * Survives renames within the canonical vocabulary.
+ *
+ * Dev members on each theme are not touched here — overrides are BD-keyed
+ * only. Dev re-assignment would require extending the theme_row_overrides
+ * schema; deliberately out of scope.
  */
 function applyRowOverrides(themes: Theme[]): Theme[] {
   const overrides = listRowOverrides();
