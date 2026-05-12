@@ -84,6 +84,12 @@ export type LinkageData = {
   /** Snapshot of the BD rows referenced by coverage entries, so the view can
    * render uncovered-BD details without a second fetch. Keyed by recordId. */
   bdById: Record<string, BdRow>;
+  /** Orphan Dev tickets (no BD pair — i.e. push) grouped by their direct
+   * theme membership from `theme.devRecordIds`. Key is theme id, or
+   * `"_no_theme"` for push tickets with no theme assignment. Optional for
+   * forward-compat with older API responses; older clients fall back to the
+   * flat `orphanDev` list. */
+  orphanDevByTheme?: Record<string, DevRow[]>;
   /** True when the underlying themes blob has `mode === "unavailable"` —
    * clustering couldn't be computed (no claude CLI, timeout, zero parseable
    * themes). The view surfaces a clearer empty state + retry CTA in that

@@ -94,7 +94,12 @@ export function LinkageView() {
         ) : (
           <ul className="divide-y divide-neutral-100">
             {data.coverage.map((c) => (
-              <CoverageCard key={c.theme.id} entry={c} bdById={data.bdById} />
+              <CoverageCard
+                key={c.theme.id}
+                entry={c}
+                bdById={data.bdById}
+                pushDev={data.orphanDevByTheme?.[c.theme.id] ?? []}
+              />
             ))}
           </ul>
         )}
@@ -191,9 +196,11 @@ function Section({
 function CoverageCard({
   entry,
   bdById,
+  pushDev,
 }: {
   entry: CoverageEntry;
   bdById: LinkageData["bdById"];
+  pushDev: DevRow[];
 }) {
   const [expanded, setExpanded] = React.useState(false);
   const total = entry.coveredBdCount + entry.uncoveredBdCount;
@@ -279,8 +286,48 @@ function CoverageCard({
               </ul>
             </div>
           ) : null}
+          {pushDev.length > 0 ? (
+            <div>
+              <h4 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                Push (no BD link) ({pushDev.length})
+              </h4>
+              <ul className="divide-y divide-neutral-100 rounded-md border border-neutral-200">
+                {pushDev.map((d) => (
+                  <CoveragePushDevRow key={d.recordId} dev={d} />
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
       ) : null}
+    </li>
+  );
+}
+
+function CoveragePushDevRow({ dev }: { dev: DevRow }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  function open() {
+    const next = new URLSearchParams(searchParams.toString());
+    next.set("panel", dev.recordId);
+    next.set("kind", "dev");
+    next.delete("flow");
+    router.push(`${pathname}?${next.toString()}`);
+  }
+
+  return (
+    <li
+      className="grid grid-cols-[1fr_auto_auto_auto] items-baseline gap-3 px-3 py-2 text-xs cursor-pointer hover:bg-neutral-50"
+      onClick={open}
+    >
+      <span className="truncate text-neutral-800">{dev.description}</span>
+      <Badge tone="neutral">{dev.status || "—"}</Badge>
+      <span className="text-neutral-500">ETA {formatLarkDate(dev.eta)}</span>
+      <span className="text-neutral-500">
+        Rel {formatLarkDate(dev.releaseDate)}
+      </span>
     </li>
   );
 }

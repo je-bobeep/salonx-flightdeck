@@ -15,6 +15,7 @@ import type {
   DevRow,
   LinkageData,
 } from "@/lib/data-shapes";
+import type { Theme } from "@flightdeck/themes/shapes";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -110,6 +111,22 @@ export async function GET() {
     (a, b) => (b.lastModifiedMs ?? 0) - (a.lastModifiedMs ?? 0)
   );
 
+  // Group orphans (push tickets) by their direct theme membership so the
+  // view can surface them under each theme rather than as one flat bucket.
+  // Push tickets with no theme land under "_no_theme".
+  const orphanDevByTheme: Record<string, DevRow[]> = {};
+  if (themesCache) {
+    const devToTheme = new Map<string, Theme>();
+    for (const t of themesCache.blob.themes) {
+      for (const id of t.devRecordIds) devToTheme.set(id, t);
+    }
+    for (const dev of orphanDev) {
+      const t = devToTheme.get(dev.recordId);
+      const key = t?.id ?? "_no_theme";
+      (orphanDevByTheme[key] ??= []).push(dev);
+    }
+  }
+
   // Snapshot of BD rows referenced by coverage entries (so the view can render
   // uncovered BD details without an extra fetch). Keeps payload small by only
   // including referenced rows.
@@ -127,6 +144,7 @@ export async function GET() {
   const data: LinkageData = {
     pairs,
     orphanDev,
+    orphanDevByTheme,
     coverage,
     bdById: bdById_out,
     themesUnavailable: themesCache?.blob.mode === "unavailable",
