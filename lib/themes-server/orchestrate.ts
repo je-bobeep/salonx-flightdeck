@@ -1,12 +1,14 @@
 // Server-side helpers for theme cluster fetch+compute. Used by the themes,
 // linkage, and roadmap API routes — they all need the same blob.
 
-import { fetchAllBd, projectBd } from "./fetch";
+import { fetchAllBd, fetchAllDev, projectBd, projectDev } from "./fetch";
+import type { DevRow } from "./types";
 import {
   assignNewRows,
   clusterBd,
   extractNewThemeNames,
   type BdInputRow,
+  type FeedbackInputRow,
 } from "@flightdeck/themes/cluster";
 import {
   readLastBlob,
@@ -41,6 +43,21 @@ const CLUSTER_MAX_ROWS = 80;
  * if something genuinely hangs. */
 const CLUSTER_TIMEOUT_MS = 300_000;
 
+function projectDevForCluster(rows: DevRow[]): FeedbackInputRow[] {
+  return rows.map((r) => ({
+    recordId: r.recordId,
+    source: "dev" as const,
+    item: r.storyDescription || r.description || "",
+    translate: r.storyDescription || r.description || "",
+    category: r.module,
+    subCategory: "",
+    priority: r.priority,
+    ageDays: null, // Dev ageDays not reliable; left null so it's ignored by median calc
+    linkedDevIds: [],
+    dateCreatedMs: r.lastModifiedMs, // best-available signal for "rising"
+  }));
+}
+
 function projectInputs(rows: ReturnType<typeof projectBd>[]): BdInputRow[] {
   return rows.map((r) => ({
     recordId: r.recordId,
@@ -56,26 +73,61 @@ function projectInputs(rows: ReturnType<typeof projectBd>[]): BdInputRow[] {
   }));
 }
 
-async function fetchAndSampleInputs(): Promise<BdInputRow[]> {
-  const raws = await fetchAllBd();
-  const bdRows = raws.map((r) => projectBd(r));
-  const candidates = bdRows.filter((r) => r.status !== "Done");
-  // Always include unaddressed rows (no linked Dev, not deployed) — they're
-  // the population Triage cares about. Fill remaining slots with most-recent
-  // of the rest.
-  const unaddressed = candidates.filter(
+async function fetchAndSampleInputs(): Promise<FeedbackInputRow[]> {
+  const [bdRaws, devRaws] = await Promise.all([fetchAllBd(), fetchAllDev()]);
+  const bdRows = bdRaws.map((r) => projectBd(r));
+  const devRows = devRaws.map((r) => projectDev(r));
+
+  // BD: status != "Done"
+  const bdCandidates = bdRows.filter((r) => r.status !== "Done");
+
+  // Dev: "non-shipped" filter. Reuse the same logic as RoadmapView — see
+  // apps/dashboard/components/views/RoadmapView.tsx:43 for the canonical
+  // description. Rows are non-shipped when status is NOT in the terminal set
+  // AND releaseDate is empty. Use whatever the existing isDevShipped helper
+  // is named; if it doesn't exist, inline the predicate here.
+  // Mirrors the "done" bucket in apps/dashboard/lib/status.ts — the canonical
+  // shipped/terminal set for Feature Development rows.
+  const TERMINAL_DEV_STATUSES = new Set(["Released", "Done", "Won't Do"]);
+  const devCandidates = devRows.filter(
+    (r) => !TERMINAL_DEV_STATUSES.has(r.status) && !r.releaseDate
+  );
+
+  // Sample priority order: unaddressed BD → push Dev (no BD link) → fill with
+  // most-recent of the rest of both populations.
+  const unaddressedBd = bdCandidates.filter(
     (r) => !r.hasLinkedDev && !r.hasDayOfDeploying
   );
-  const remaining = candidates
-    .filter((r) => r.hasLinkedDev || r.hasDayOfDeploying)
-    .sort(
-      (a, b) =>
-        (b.dateCreatedMs ?? b.dateRecordedMs ?? 0) -
-        (a.dateCreatedMs ?? a.dateRecordedMs ?? 0)
-    );
-  const fillCount = Math.max(0, CLUSTER_MAX_ROWS - unaddressed.length);
-  const sampled = [...unaddressed, ...remaining.slice(0, fillCount)];
-  return projectInputs(sampled);
+  const pushDev = devCandidates.filter((r) => r.bdLinkIds.length === 0);
+
+  const restBd = bdCandidates.filter(
+    (r) => r.hasLinkedDev || r.hasDayOfDeploying
+  );
+  const pullDev = devCandidates.filter((r) => r.bdLinkIds.length > 0);
+  const rest = [...restBd, ...pullDev].sort((a, b) => {
+    const am =
+      ("dateCreatedMs" in a ? a.dateCreatedMs : null) ??
+      ("dateRecordedMs" in a ? (a as { dateRecordedMs: number | null }).dateRecordedMs : null) ??
+      ("lastModifiedMs" in a ? (a as { lastModifiedMs: number | null }).lastModifiedMs : null) ??
+      0;
+    const bm =
+      ("dateCreatedMs" in b ? b.dateCreatedMs : null) ??
+      ("dateRecordedMs" in b ? (b as { dateRecordedMs: number | null }).dateRecordedMs : null) ??
+      ("lastModifiedMs" in b ? (b as { lastModifiedMs: number | null }).lastModifiedMs : null) ??
+      0;
+    return bm - am;
+  });
+
+  const CLUSTER_MAX_ROWS_LOCAL = CLUSTER_MAX_ROWS; // reuse the existing constant
+  const sampled = [...unaddressedBd, ...pushDev, ...rest].slice(
+    0,
+    CLUSTER_MAX_ROWS_LOCAL
+  );
+
+  // sampled is a mixed array of BdRow | DevRow. Project each by its origin.
+  const bdSampled = sampled.filter((r): r is typeof bdRows[number] => "number" in r);
+  const devSampled = sampled.filter((r): r is typeof devRows[number] => "storyDescription" in r);
+  return [...projectInputs(bdSampled), ...projectDevForCluster(devSampled)];
 }
 
 /**
@@ -282,6 +334,7 @@ async function computeIncremental(
   const existingAssignedIds = new Set<string>();
   for (const t of prevBlob.themes) {
     for (const id of t.bdRecordIds) existingAssignedIds.add(id);
+    for (const id of t.devRecordIds) existingAssignedIds.add(id);
   }
   const newRows = inputs.filter((r) => !existingAssignedIds.has(r.recordId));
 
