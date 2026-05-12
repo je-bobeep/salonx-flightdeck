@@ -88,12 +88,9 @@ async function fetchAndSampleInputs(): Promise<FeedbackInputRow[]> {
   // BD: status != "Done"
   const bdCandidates = bdRows.filter((r) => r.status !== "Done");
 
-  // Dev: "non-shipped" filter. Reuse the same logic as RoadmapView — see
-  // apps/dashboard/components/views/RoadmapView.tsx:43 for the canonical
-  // description. Rows are non-shipped when status is NOT in the terminal set
-  // AND releaseDate is empty. Use whatever the existing isDevShipped helper
-  // is named; if it doesn't exist, inline the predicate here.
-  // Mirrors the "done" bucket in apps/dashboard/lib/status.ts — the canonical
+  // Dev: "non-shipped" filter. Rows are non-shipped when status is NOT in the
+  // terminal set AND releaseDate is empty. The terminal set mirrors the "done"
+  // bucket in apps/dashboard/lib/status.ts:DONE — the canonical
   // shipped/terminal set for Feature Development rows.
   const TERMINAL_DEV_STATUSES = new Set(["Released", "Done", "Won't Do"]);
   const devCandidates = devRows.filter(
