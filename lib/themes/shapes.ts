@@ -9,7 +9,10 @@ export type Theme = {
   description: string;
   /** Member BD record IDs. */
   bdRecordIds: string[];
-  /** Member Dev record IDs (joined from BD members' linkedDevIds). */
+  /** Member Dev record IDs. Directly assigned by Claude during clustering —
+   * a Dev row is in this theme because the model grouped it here based on
+   * its own content (story description, module). Includes both pull tickets
+   * (BD-linked) and push tickets (no BD link). */
   devRecordIds: string[];
   dominantCategories: string[];
   dominantSubCategories: string[];
