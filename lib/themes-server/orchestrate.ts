@@ -2,7 +2,7 @@
 // linkage, and roadmap API routes — they all need the same blob.
 
 import { fetchAllBd, fetchAllDev, projectBd, projectDev } from "./fetch";
-import type { DevRow } from "./types";
+import type { BdRow, DevRow } from "./types";
 import {
   assignNewRows,
   clusterBd,
@@ -43,6 +43,11 @@ const CLUSTER_MAX_ROWS = 80;
  * if something genuinely hangs. */
 const CLUSTER_TIMEOUT_MS = 300_000;
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Dev ageDays derived from lastModifiedMs as a proxy — Dev has no Date Created
+// column on DevRow today. Less consistent than BD ageDays; bdMedianAgeDays on
+// themes stays BD-only.
 function projectDevForCluster(rows: DevRow[]): FeedbackInputRow[] {
   return rows.map((r) => ({
     recordId: r.recordId,
@@ -52,7 +57,10 @@ function projectDevForCluster(rows: DevRow[]): FeedbackInputRow[] {
     category: r.module,
     subCategory: "",
     priority: r.priority,
-    ageDays: null, // Dev ageDays not reliable; left null so it's ignored by median calc
+    ageDays:
+      r.lastModifiedMs !== null
+        ? Math.max(0, Math.floor((Date.now() - r.lastModifiedMs) / DAY_MS))
+        : null,
     linkedDevIds: [],
     dateCreatedMs: r.lastModifiedMs, // best-available signal for "rising"
   }));
@@ -100,33 +108,47 @@ async function fetchAndSampleInputs(): Promise<FeedbackInputRow[]> {
   );
   const pushDev = devCandidates.filter((r) => r.bdLinkIds.length === 0);
 
+  type TaggedRow =
+    | { kind: "bd"; row: BdRow }
+    | { kind: "dev"; row: DevRow };
+
+  const tagBd = (r: BdRow): TaggedRow => ({ kind: "bd", row: r });
+  const tagDev = (r: DevRow): TaggedRow => ({ kind: "dev", row: r });
+
+  // Priority order: unaddressed BD → push Dev → most-recent of the rest.
   const restBd = bdCandidates.filter(
     (r) => r.hasLinkedDev || r.hasDayOfDeploying
   );
   const pullDev = devCandidates.filter((r) => r.bdLinkIds.length > 0);
-  const rest = [...restBd, ...pullDev].sort((a, b) => {
+
+  const rest: TaggedRow[] = [
+    ...restBd.map(tagBd),
+    ...pullDev.map(tagDev),
+  ].sort((a, b) => {
     const am =
-      ("dateCreatedMs" in a ? a.dateCreatedMs : null) ??
-      ("dateRecordedMs" in a ? (a as { dateRecordedMs: number | null }).dateRecordedMs : null) ??
-      ("lastModifiedMs" in a ? (a as { lastModifiedMs: number | null }).lastModifiedMs : null) ??
-      0;
+      a.kind === "bd"
+        ? a.row.dateCreatedMs ?? a.row.dateRecordedMs ?? 0
+        : a.row.lastModifiedMs ?? 0;
     const bm =
-      ("dateCreatedMs" in b ? b.dateCreatedMs : null) ??
-      ("dateRecordedMs" in b ? (b as { dateRecordedMs: number | null }).dateRecordedMs : null) ??
-      ("lastModifiedMs" in b ? (b as { lastModifiedMs: number | null }).lastModifiedMs : null) ??
-      0;
+      b.kind === "bd"
+        ? b.row.dateCreatedMs ?? b.row.dateRecordedMs ?? 0
+        : b.row.lastModifiedMs ?? 0;
     return bm - am;
   });
 
-  const CLUSTER_MAX_ROWS_LOCAL = CLUSTER_MAX_ROWS; // reuse the existing constant
-  const sampled = [...unaddressedBd, ...pushDev, ...rest].slice(
-    0,
-    CLUSTER_MAX_ROWS_LOCAL
-  );
+  const sampled: TaggedRow[] = [
+    ...unaddressedBd.map(tagBd),
+    ...pushDev.map(tagDev),
+    ...rest,
+  ].slice(0, CLUSTER_MAX_ROWS);
 
-  // sampled is a mixed array of BdRow | DevRow. Project each by its origin.
-  const bdSampled = sampled.filter((r): r is typeof bdRows[number] => "number" in r);
-  const devSampled = sampled.filter((r): r is typeof devRows[number] => "storyDescription" in r);
+  const bdSampled = sampled
+    .filter((s): s is { kind: "bd"; row: BdRow } => s.kind === "bd")
+    .map((s) => s.row);
+  const devSampled = sampled
+    .filter((s): s is { kind: "dev"; row: DevRow } => s.kind === "dev")
+    .map((s) => s.row);
+
   return [...projectInputs(bdSampled), ...projectDevForCluster(devSampled)];
 }
 
@@ -150,8 +172,6 @@ export async function computeUnavailableNow(): Promise<ThemesFetchResult> {
     fresh: true,
   };
 }
-
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 const FNV_OFFSET = 2166136261;
 
