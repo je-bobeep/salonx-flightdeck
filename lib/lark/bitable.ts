@@ -34,6 +34,11 @@ export type FieldMeta = {
   fieldName: string;
   type: number;
   uiType: string | undefined;
+  /** Field-shape metadata. For Select/MultiSelect fields, holds
+   * `{ options: Array<{ name, id, color, ... }> }`. Callers who need
+   * the option list (e.g. the BD poller's loadKnownCategories) read it
+   * from here. */
+  property: unknown;
 };
 
 const fieldCache = new Map<string, { fields: FieldMeta[]; fetchedAt: number }>();
@@ -63,6 +68,7 @@ export async function listFields(
         fieldName: item.field_name,
         type: item.type,
         uiType: item.ui_type,
+        property: item.property,
       });
     }
     pageToken = parsed.data?.has_more ? parsed.data.page_token : undefined;

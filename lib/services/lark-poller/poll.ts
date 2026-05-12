@@ -48,7 +48,10 @@ export type PollSummary = {
 
 let cachedCategories: string[] | null = null;
 async function loadKnownCategories(): Promise<string[]> {
-  if (cachedCategories) return cachedCategories;
+  // Only use the cache when it actually has entries — caching an empty array
+  // would mean a single failed lookup poisons the rest of the process
+  // lifetime. listFields() has its own 5-min TTL, so re-asking is cheap.
+  if (cachedCategories && cachedCategories.length > 0) return cachedCategories;
   const fields = await listFields(
     TRACKER.appToken,
     TRACKER.tables.bdFeedback
@@ -56,8 +59,9 @@ async function loadKnownCategories(): Promise<string[]> {
   const categoryField = fields.find((f) => f.fieldName === "Category");
   if (!categoryField) return [];
   // Lark MultiSelect property includes options[].name
-  const prop = (categoryField as unknown as { property?: { options?: Array<{ name?: unknown }> } })
-    .property;
+  const prop = categoryField.property as
+    | { options?: Array<{ name?: unknown }> }
+    | undefined;
   const names = (prop?.options ?? [])
     .map((o) => o.name)
     .filter((n): n is string => typeof n === "string");
