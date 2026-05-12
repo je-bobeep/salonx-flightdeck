@@ -526,7 +526,7 @@ function dedup(arr: string[]): string[] {
  *   shares ≥70% members, reuse its id. Otherwise mint slug + short hash.
  */
 function pickStableId(
-  bdRecordIds: string[],
+  memberIds: string[],
   name: string,
   previousThemes?: { id: string; bdRecordIds: string[] }[]
 ): string {
@@ -534,7 +534,7 @@ function pickStableId(
     return slugify(name);
   }
   if (previousThemes && previousThemes.length > 0) {
-    const memberSet = new Set(bdRecordIds);
+    const memberSet = new Set(memberIds);
     let bestId: string | null = null;
     let bestOverlap = 0;
     for (const prev of previousThemes) {
@@ -544,7 +544,7 @@ function pickStableId(
         0
       );
       const ratio =
-        overlap / Math.min(prev.bdRecordIds.length, bdRecordIds.length);
+        overlap / Math.min(prev.bdRecordIds.length, memberIds.length);
       if (ratio >= 0.7 && overlap > bestOverlap) {
         bestId = prev.id;
         bestOverlap = overlap;
@@ -552,7 +552,7 @@ function pickStableId(
     }
     if (bestId) return bestId;
   }
-  return slugify(name) + "-" + shortHash(bdRecordIds);
+  return slugify(name) + "-" + shortHash(memberIds);
 }
 
 function slugify(s: string): string {
