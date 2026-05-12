@@ -141,9 +141,11 @@ export function TopThemes({
   };
   const scopedThemes: ScopedTheme[] = allThemes.map((t) => {
     if (!scopeBdIds) {
+      // Unscoped global view: include Claude-assigned Dev members so push
+      // tickets (Dev rows with no BD link) contribute to the chip count.
       return {
         ...t,
-        scopedCount: t.bdVolume,
+        scopedCount: t.bdRecordIds.length + t.devRecordIds.length,
         scopedMedianAgeDays: t.bdMedianAgeDays,
       };
     }
@@ -303,10 +305,10 @@ export function TopThemes({
                   className="text-[11px] text-neutral-500"
                   title={
                     effectiveSortMode === "dev"
-                      ? `${count} ${countLabel} (${t.bdVolume} BD rows in cluster)`
+                      ? `${count} ${countLabel} (${t.bdRecordIds.length} BD · ${t.devRecordIds.length} Dev in cluster)`
                       : scopeBdIds
-                        ? `${count} in this view (${t.bdVolume} total in cluster)`
-                        : `${t.bdVolume} BD rows in this theme`
+                        ? `${count} in this view (${t.bdRecordIds.length} BD · ${t.devRecordIds.length} Dev total in cluster)`
+                        : `${t.bdRecordIds.length} BD rows · ${t.devRecordIds.length} Dev tickets in this theme`
                   }
                 >
                   {count}
