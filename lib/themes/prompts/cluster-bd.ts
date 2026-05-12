@@ -47,9 +47,13 @@ export function clusterBdSystemPrompt(opts: ClusterPromptOpts = {}): string {
 Your previous response had >${MAX_NEW_THEMES_PER_RUN} brand-new theme names. This retry MUST stay within the cap. If no candidate fits a row's concern, force-fit it into the closest candidate or the "Other (cross-cutting)" bucket rather than minting a new name.`
     : "";
 
-  return `You cluster BD-feedback rows from a SalonX product feedback log into a small set of THEMES.
+  return `You cluster product-feedback signals from a SalonX intake log into a small set of THEMES.
 
-A theme is a coherent user-facing concern. Examples: "Timezone correctness", "WhatsApp delivery", "Split-bill UX", "Staff scheduling conflicts". A theme is NOT a category like "Bug" or "Enhancement" — those are too coarse.
+Each signal is either:
+  - a BD-feedback request from a merchant (source = "bd"), or
+  - a Feature Development ticket from engineering (source = "dev").
+
+A theme is a coherent user-facing CONCERN. Examples: "Timezone correctness", "WhatsApp delivery", "Split-bill UX", "Staff scheduling conflicts". A theme is NOT a category like "Bug" or "Enhancement" — those are too coarse. Group by underlying concern, NOT by source: a BD complaint about mobile calendar slowness and a Dev ticket titled "Make calendar mobile-responsive" belong in the same theme.
 
 CANDIDATE_THEMES
 You MUST prefer choosing names from the list below. Emit a brand-new name ONLY when no candidate fits. Total themes 5–15. The number of brand-new (non-candidate) names is capped at ${MAX_NEW_THEMES_PER_RUN} per run. Going over the cap will cause your response to be rejected.
@@ -57,8 +61,9 @@ You MUST prefer choosing names from the list below. Emit a brand-new name ONLY w
 ${renderCandidateList()}
 
 INPUT
-The user message contains a JSON array of BD-feedback rows. Each row has:
-  { record_id, item, translate, category, subCategory, priority, ageDays }
+The user message contains a JSON array of feedback signals. Each row has:
+  { record_id, source, item, translate, category, subCategory, priority, ageDays }
+where source is "bd" or "dev".
 
 OUTPUT
 Return ONLY valid JSON in this exact shape (no prose, no markdown fences):
@@ -66,8 +71,9 @@ Return ONLY valid JSON in this exact shape (no prose, no markdown fences):
   "themes": [
     {
       "name": "<short label, ≤ 4 words, Title Case — prefer a CANDIDATE_THEMES name>",
-      "description": "<one sentence explaining what unifies these rows>",
+      "description": "<one sentence explaining what unifies these signals>",
       "bdRecordIds": ["rec...", "rec..."],
+      "devRecordIds": ["rec...", "rec..."],
       "dominantCategories": ["<top 1–2 from member rows>"],
       "dominantSubCategories": ["<top 1–2 from member rows>"]
     }
@@ -76,7 +82,8 @@ Return ONLY valid JSON in this exact shape (no prose, no markdown fences):
 
 CONSTRAINTS
 - 5 to 15 themes total. If the input is small (<10 rows), fewer is fine but at least 2 distinct themes.
-- Every input record_id must appear in exactly ONE theme. No duplicates, no omissions.
+- Every input record_id (BD or Dev) must appear in exactly ONE theme. No duplicates across themes, no omissions.
+- BD record_ids go in bdRecordIds; Dev record_ids go in devRecordIds. NEVER put a "bd"-source record in devRecordIds or vice versa.
 - Theme names: ≤ 4 words, Title Case, no trailing punctuation.
 - Description: 1 short sentence (≤ 20 words).
 - Group by underlying CONCERN, not surface phrasing — translate into the same theme even if rows are in different languages.
@@ -111,7 +118,9 @@ export function assignBdSystemPrompt(opts: AssignPromptOpts): string {
 Your previous response minted >${MAX_NEW_THEMES_PER_RUN} new themes. This retry MUST stay within the cap. If no existing theme fits a row, force-fit it into the closest candidate or "Other (cross-cutting)" rather than minting a new name.`
     : "";
 
-  return `You assign NEW BD-feedback rows to an EXISTING set of themes. Existing assignments are STICKY — never reshuffle them. Prefer assignment to an existing theme over creating a new one.
+  return `You assign NEW product-feedback signals to an EXISTING set of themes. Existing assignments are STICKY — never reshuffle them. Prefer assignment to an existing theme over creating a new one.
+
+Each new signal is either source = "bd" (BD-feedback request from a merchant) or source = "dev" (Feature Development ticket from engineering). Source has no bearing on grouping — group by underlying concern.
 
 EXISTING THEMES (use these theme_ids verbatim when assigning):
 ${catalog}
@@ -121,25 +130,25 @@ When you must mint a new theme (cap: ${MAX_NEW_THEMES_PER_RUN}/call), prefer nam
 
 ${renderCandidateList()}
 
-INPUT: a JSON array of new rows: [{ record_id, item, translate, category, subCategory, priority, ageDays }]
+INPUT: a JSON array of new signals: [{ record_id, source, item, translate, category, subCategory, priority, ageDays }]
 
 OUTPUT: strict JSON of this exact shape (no markdown, no prose):
 {
   "assignments": [
-    { "record_id": "rec...", "theme_id": "<existing theme_id>" }
+    { "record_id": "rec...", "source": "bd" | "dev", "theme_id": "<existing theme_id>" }
   ],
   "newThemes": [
     {
       "tempId": "new-1",
       "name": "<short Title Case label, ≤ 4 words — prefer a CANDIDATE_THEMES name>",
       "description": "<one sentence, ≤ 20 words>",
-      "bdRecordIds": ["rec..."]
+      "members": [ { "id": "rec...", "source": "bd" | "dev" } ]
     }
   ]
 }
 
 CONSTRAINTS
-- Every input record_id appears in EXACTLY ONE place: either an "assignments" entry pointing at an existing theme_id, or in a newTheme.bdRecordIds array.
+- Every input record_id appears in EXACTLY ONE place: either an "assignments" entry pointing at an existing theme_id, or in a newTheme.members array.
 - Cap newThemes at ${MAX_NEW_THEMES_PER_RUN} per call. Force-fit a row into an existing theme unless truly no theme is a fit.
 - New theme names: ≤ 4 words, Title Case, distinct from any existing theme name.
 - Group by underlying CONCERN, not by category labels like "Bug" or "Enhancement".${strictFooter}
