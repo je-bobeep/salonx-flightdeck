@@ -5,6 +5,7 @@ import {
   readThemesCachedOnly,
 } from "@flightdeck/themes-server/orchestrate";
 import { readLastBlob } from "@flightdeck/themes/cache";
+import { acquireClusterMutex, releaseClusterMutex } from "@flightdeck/auth/cluster-mutex";
 
 export const runtime = "nodejs";
 // Claude clustering with sonnet on ~30 rows takes ~4 min wall-clock. We need
@@ -96,6 +97,16 @@ export async function POST(req: Request) {
     lastFromScratchAt.value = Date.now();
   }
 
+  if (!acquireClusterMutex("user")) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Clustering already in progress (poller-side run). Try again in a moment.",
+      },
+      { status: 409, headers: { "retry-after": "30" } }
+    );
+  }
+
   try {
     const fresh = await computeFreshThemes({ mode });
     return NextResponse.json({ ok: true, ...fresh });
@@ -104,5 +115,7 @@ export async function POST(req: Request) {
       { ok: false, error: e instanceof Error ? e.message : String(e) },
       { status: 500 }
     );
+  } finally {
+    releaseClusterMutex();
   }
 }
