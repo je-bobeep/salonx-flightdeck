@@ -218,12 +218,6 @@ importers:
 
   lib/themes-server:
     dependencies:
-      '@flightdeck/auth':
-        specifier: workspace:*
-        version: link:../auth
-      '@flightdeck/claude':
-        specifier: workspace:*
-        version: link:../claude
       '@flightdeck/lark':
         specifier: workspace:*
         version: link:../lark

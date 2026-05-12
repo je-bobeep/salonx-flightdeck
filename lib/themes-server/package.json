@@ -10,8 +10,6 @@
     "./taxonomy-proposals-db": "./taxonomy-proposals-db.ts"
   },
   "dependencies": {
-    "@flightdeck/auth": "workspace:*",
-    "@flightdeck/claude": "workspace:*",
     "@flightdeck/lark": "workspace:*",
     "@flightdeck/themes": "workspace:*",
     "better-sqlite3": "^11.5.0"
