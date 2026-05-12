@@ -198,31 +198,37 @@ function slugify(s: string): string {
  * (possibly merged) member list. Used by the incremental path after we've
  * appended new BD ids into existing themes.
  */
-function recomputeMetrics(themes: Theme[], byId: Map<string, BdInputRow>): Theme[] {
+function recomputeMetrics(themes: Theme[], byId: Map<string, FeedbackInputRow>): Theme[] {
   const now = Date.now();
   return themes.map((t) => {
-    const members = t.bdRecordIds
+    const bdMembers = t.bdRecordIds
       .map((id) => byId.get(id))
-      .filter((r): r is BdInputRow => !!r);
-    const ages = members
+      .filter((r): r is FeedbackInputRow => !!r && r.source === "bd");
+    const devMembers = t.devRecordIds
+      .map((id) => byId.get(id))
+      .filter((r): r is FeedbackInputRow => !!r && r.source === "dev");
+
+    // Median age: BD only.
+    const ages = bdMembers
       .map((r) => r.ageDays)
       .filter((v): v is number => typeof v === "number")
       .sort((a, b) => a - b);
-    const newCount = members.reduce((acc, r) => {
+
+    // Rising: ≥3 BD-or-Dev members with dateCreatedMs in last 14 days.
+    const newCount = [...bdMembers, ...devMembers].reduce((acc, r) => {
       if (typeof r.dateCreatedMs === "number" && now - r.dateCreatedMs < 14 * DAY_MS)
         return acc + 1;
       return acc;
     }, 0);
-    const devRecordIds = [
-      ...new Set(members.flatMap((r) => r.linkedDevIds ?? [])),
-    ];
+
     return {
       ...t,
-      bdVolume: members.length,
+      bdRecordIds: bdMembers.map((r) => r.recordId),
+      devRecordIds: devMembers.map((r) => r.recordId),
+      bdVolume: bdMembers.length,
       bdMedianAgeDays:
         ages.length === 0 ? null : ages[Math.floor(ages.length / 2)],
       rising: newCount >= 3,
-      devRecordIds,
     };
   });
 }
