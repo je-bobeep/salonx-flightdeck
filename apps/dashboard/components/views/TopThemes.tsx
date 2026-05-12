@@ -118,6 +118,10 @@ export function TopThemes({
   }
 
   const allThemes = data.blob.themes;
+  // Proposals card reflects the current blob: BD-only on Triage (scopeBdIds
+  // set), Dev-only on Roadmap (themeCounts set), both on neutral pages.
+  const pageMode: "bd" | "dev" | "both" =
+    scopeBdIds ? "bd" : themeCounts ? "dev" : "both";
   // Deterministic-fallback mode: legacy cache state from before
   // theme-clustering-v2 Phase 2. New blobs no longer use this mode —
   // writeThemesCache rejects fallback writes — but older buckets may still
@@ -206,7 +210,11 @@ export function TopThemes({
           onRefresh={() => refresh.mutate("incremental")}
           unavailable
         >
-          <ProposalsCard />
+          <ProposalsCard
+            themes={allThemes}
+            pageMode={pageMode}
+            onSelectTheme={onSelectTheme}
+          />
           <div className="flex flex-col items-start gap-2 border-l-2 border-amber-300 bg-amber-50/50 px-4 py-3">
             <p className="text-xs text-amber-900">
               Theme clustering is temporarily unavailable. Click{" "}
@@ -495,52 +503,107 @@ function SortToggle({
  * proposal exists. Accept = record-only (the user still has to add the name
  * to lib/themes/taxonomy.ts manually); Reject = remember the decline so we
  * stop nagging about the same name on every cluster run.
+ *
+ * Counts come from the current cluster blob (not the stored member_count,
+ * which is BD-only and stale-by-design). Stale proposals — names Claude
+ * minted in a previous run but no longer mints — are filtered out silently;
+ * the DB row stays and will resurface if the same name re-appears.
  */
-function ProposalsCard() {
+function ProposalsCard({
+  themes,
+  pageMode,
+  onSelectTheme,
+}: {
+  themes?: Theme[];
+  pageMode?: "bd" | "dev" | "both";
+  onSelectTheme?: (theme: Theme | null) => void;
+}) {
   const { data } = useTaxonomyProposals();
   const decide = useDecideProposal();
   const proposals = data?.proposals ?? [];
   if (proposals.length === 0) return null;
 
+  // Match by lowercased+trimmed name; the slug isn't on the proposal row.
+  const byName = new Map<string, Theme>();
+  for (const t of themes ?? []) {
+    byName.set(t.name.trim().toLowerCase(), t);
+  }
+  const live = proposals
+    .map((p) => ({ p, theme: byName.get(p.name.trim().toLowerCase()) }))
+    .filter((row) => row.theme !== undefined) as {
+    p: (typeof proposals)[number];
+    theme: Theme;
+  }[];
+  if (live.length === 0) return null;
+
+  function renderCount(t: Theme): { label: string; tooltip: string } {
+    const bd = t.bdRecordIds.length;
+    const dev = t.devRecordIds.length;
+    if (pageMode === "bd") {
+      return { label: `${bd}`, tooltip: `${bd} BD rows in this theme` };
+    }
+    if (pageMode === "dev") {
+      return { label: `${dev}`, tooltip: `${dev} Dev tickets in this theme` };
+    }
+    return {
+      label: `${bd} BD · ${dev} Dev`,
+      tooltip: `${bd} BD rows · ${dev} Dev tickets in this theme`,
+    };
+  }
+
   return (
     <div className="border-b border-neutral-100 bg-blue-50/40 px-4 py-2 text-xs">
       <div className="mb-1 font-semibold text-blue-900">
-        Proposed new themes ({proposals.length})
+        Proposed new themes ({live.length})
       </div>
       <ul className="space-y-1">
-        {proposals.map((p) => (
-          <li key={p.name} className="flex items-center justify-between gap-2">
-            <span
-              className="truncate text-neutral-800"
-              title={`${p.memberCount} BD rows`}
+        {live.map(({ p, theme }) => {
+          const { label, tooltip } = renderCount(theme);
+          return (
+            <li
+              key={p.name}
+              className="flex items-center justify-between gap-2"
             >
-              {p.name}
-              <span className="ml-2 text-neutral-500">{p.memberCount}</span>
-            </span>
-            <div className="flex shrink-0 gap-1">
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() =>
-                  decide.mutate({ name: p.name, action: "accept" })
-                }
-                disabled={decide.isPending}
-              >
-                Accept
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() =>
-                  decide.mutate({ name: p.name, action: "reject" })
-                }
-                disabled={decide.isPending}
-              >
-                Reject
-              </Button>
-            </div>
-          </li>
-        ))}
+              <span className="truncate text-neutral-800" title={tooltip}>
+                <button
+                  type="button"
+                  onClick={() => onSelectTheme?.(theme)}
+                  className={cn(
+                    "text-left",
+                    onSelectTheme
+                      ? "cursor-pointer text-blue-700 hover:underline"
+                      : "cursor-default"
+                  )}
+                >
+                  {p.name}
+                </button>
+                <span className="ml-2 text-neutral-500">{label}</span>
+              </span>
+              <div className="flex shrink-0 gap-1">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() =>
+                    decide.mutate({ name: p.name, action: "accept" })
+                  }
+                  disabled={decide.isPending}
+                >
+                  Accept
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() =>
+                    decide.mutate({ name: p.name, action: "reject" })
+                  }
+                  disabled={decide.isPending}
+                >
+                  Reject
+                </Button>
+              </div>
+            </li>
+          );
+        })}
       </ul>
       <p className="mt-1 text-[10px] text-neutral-500">
         Accept records the decision; add the name to lib/themes/taxonomy.ts to
