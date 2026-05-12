@@ -8,7 +8,7 @@ import {
 import {
   buildBdToThemeMap,
   readThemesCachedOnly,
-} from "@/lib/themes-server";
+} from "@flightdeck/themes-server/orchestrate";
 import type {
   BdRow,
   CoverageEntry,

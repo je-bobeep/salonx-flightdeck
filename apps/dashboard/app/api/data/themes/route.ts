@@ -3,7 +3,7 @@ import {
   computeFreshThemes,
   computeUnavailableNow,
   readThemesCachedOnly,
-} from "@/lib/themes-server";
+} from "@flightdeck/themes-server/orchestrate";
 import { readLastBlob } from "@flightdeck/themes/cache";
 
 export const runtime = "nodejs";

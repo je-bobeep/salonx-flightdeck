@@ -6,7 +6,7 @@ import {
   setDevOverride,
   setRowOverride,
 } from "@/lib/theme-overrides-db";
-import { readThemesCachedOnly } from "@/lib/themes-server";
+import { readThemesCachedOnly } from "@flightdeck/themes-server/orchestrate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

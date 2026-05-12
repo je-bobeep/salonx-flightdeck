@@ -7,7 +7,7 @@ import {
   inferCurrentSprint,
 } from "@/lib/data-derive";
 import { isActive } from "@/lib/status";
-import { readThemesCachedOnly } from "@/lib/themes-server";
+import { readThemesCachedOnly } from "@flightdeck/themes-server/orchestrate";
 import type { TodayData } from "@/lib/data-shapes";
 
 export const runtime = "nodejs";
