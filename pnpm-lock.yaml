@@ -188,6 +188,9 @@ importers:
       '@flightdeck/lark':
         specifier: workspace:*
         version: link:../../lark
+      '@flightdeck/themes-server':
+        specifier: workspace:*
+        version: link:../../themes-server
       better-sqlite3:
         specifier: ^11.5.0
         version: 11.10.0

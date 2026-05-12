@@ -14,12 +14,15 @@
     "./poll": "./poll.ts",
     "./classify": "./classify.ts",
     "./state": "./state.ts",
-    "./config": "./config.ts"
+    "./config": "./config.ts",
+    "./cluster-step": "./cluster-step.ts",
+    "./killswitch": "./killswitch.ts"
   },
   "dependencies": {
     "@flightdeck/auth": "workspace:*",
     "@flightdeck/claude": "workspace:*",
     "@flightdeck/lark": "workspace:*",
+    "@flightdeck/themes-server": "workspace:*",
     "better-sqlite3": "^11.5.0"
   },
   "devDependencies": {
