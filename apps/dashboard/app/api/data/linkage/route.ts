@@ -72,10 +72,15 @@ export async function GET() {
         (id) => !linkedBdIds.has(id)
       );
 
+      // PULL = Dev members of this theme that ALSO have a BD link in either
+      // direction. Without this filter, push tickets (no BD link, theme-
+      // assigned directly by Claude) would render under PULL in the linkage
+      // view. They stay correctly accounted for via orphanDev → orphanDevByTheme.
       const devTickets = theme.devRecordIds
         .map((id) => devById.get(id))
         .filter((d): d is DevRow => Boolean(d))
         .filter((d) => d.status !== "Done")
+        .filter((d) => linkedDevIds.has(d.recordId))
         .map((d) => ({
           recordId: d.recordId,
           description: d.description,
