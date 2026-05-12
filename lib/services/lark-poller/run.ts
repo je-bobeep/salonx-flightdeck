@@ -9,6 +9,7 @@
 // error. Auth is whatever's in .data/tokens.db — make sure you're signed in
 // via the dashboard's /auth/lark/start flow first.
 
+import { getDb } from "@flightdeck/auth/db";
 import { POLLER_CONFIG } from "./config";
 import { pollOnce } from "./poll";
 import { runClusterStep } from "./cluster-step";
@@ -34,6 +35,11 @@ const forever = process.argv.includes("--forever");
 const once = process.argv.includes("--once") || !forever;
 
 (async () => {
+  // Force migrations to run in this process before any state.ts query.
+  // state.ts opens its own DB handle; without this call, new columns added
+  // to poller_state aren't materialised until something else triggers getDb().
+  getDb();
+
   try {
     await runOnce();
   } catch (e) {
