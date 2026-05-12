@@ -1,9 +1,6 @@
 // Single-cycle poll. Reads new IM messages since the last watermark, classifies
 // them with Claude, and writes BD Feedback rows. Idempotent via poller_ingest_log.
 
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   extractMessageText,
   listChatMessages,
@@ -19,6 +16,7 @@ import {
   type DetectedPriority,
 } from "./classify";
 import { ingestMessage } from "./ingest";
+import { isWorkflowEnabled } from "./killswitch";
 import {
   getPollerState,
   hasIngested,
@@ -69,36 +67,6 @@ async function loadKnownCategories(): Promise<string[]> {
   return names;
 }
 
-// KILLSWITCH.md lives at the workspace root. poll.ts is at
-// lib/services/lark-poller/poll.ts → ../../.. = workspace root.
-const KILLSWITCH_PATH = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../../../KILLSWITCH.md"
-);
-
-function isPollerEnabled(): { enabled: boolean; reason?: string } {
-  const workflowName = "lark-bd-poller";
-  let content: string;
-  try {
-    content = fs.readFileSync(KILLSWITCH_PATH, "utf8");
-  } catch {
-    // Missing KILLSWITCH.md: fail OPEN so we don't silently mute the poller
-    // because of a deploy mishap. The on-call signal would be "no recent
-    // ingest" if this proved wrong.
-    return { enabled: true, reason: "KILLSWITCH.md not readable, defaulting open" };
-  }
-  const needle = "`" + workflowName + "`";
-  for (const line of content.split("\n")) {
-    if (!line.startsWith("|") || !line.includes(needle)) continue;
-    const cells = line.split("|").map((c) => c.trim());
-    const status = cells.find((c) => c === "enabled" || c === "disabled");
-    if (status) return { enabled: status === "enabled" };
-  }
-  // Workflow row missing → fail CLOSED. Adding the row is mandatory per
-  // KILLSWITCH.md item 1; if it's missing the deploy is malformed.
-  return { enabled: false, reason: `workflow ${workflowName} not found in KILLSWITCH.md` };
-}
-
 /**
  * Run a single poll cycle. Safe to call manually from a route handler or on
  * a setInterval. Always updates the watermark, even on partial failure
@@ -113,7 +81,7 @@ export async function pollOnce(opts: { log?: (s: string) => void } = {}): Promis
   // KILLSWITCH check FIRST — before any Lark API call or DB write. Allows
   // hot-disable without restarting the systemd unit: edit KILLSWITCH.md,
   // wait for the next cycle.
-  const ks = isPollerEnabled();
+  const ks = isWorkflowEnabled("lark-bd-poller");
   if (!ks.enabled) {
     log(`[poller] killswitch off${ks.reason ? ` (${ks.reason})` : ""}, skipping cycle`);
     return {

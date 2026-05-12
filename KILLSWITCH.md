@@ -12,6 +12,7 @@ This is a deliberate pre-flight kill switch — it exists *before* the first wor
 | `pair-sanity-flow` | User clicks "Sanity-check this pair" on a linked BD↔Dev pair in flightdeck | salonx-flightdeck | enabled | — | Verdict only (covered / partial / drifted). May propose `update_bd_status` writes. |
 | `weekly-review-flow` | User clicks "Draft this week's update" on the Pipeline view | salonx-flightdeck | enabled | — | Output is a Markdown file in `scoping-outputs/<YYYY-MM-DD>-stakeholder.md`. No Lark writes. |
 | `lark-bd-poller` | Background — every 15 min while `flightdeck-poller.service` is up on hubbibi | salonx-flightdeck | enabled | — | Reads new messages from Lark group chat `oc_545df3dd4bdb3b1f625ff88fbd3b9380`, classifies BD-shaped ones, writes BD Feedback rows directly. **Auto-fires** (no propose-then-approve in v1, since there is no human in the loop). Disable here to make the next cycle no-op without restarting the service. |
+| `auto-cluster` | After every successful lark-bd-poller cycle | salonx-flightdeck | enabled | — | Fires computeFreshThemes() at the end of each successful BD poller cycle. Reads BD + Dev rows, clusters new arrivals into existing themes (or mints up to 2 brand-new themes per call, drift-promotes to from-scratch when prior incremental minted any). Disable here to make the next cycle skip the cluster step without touching BD ingestion. |
 
 ## How to use
 
