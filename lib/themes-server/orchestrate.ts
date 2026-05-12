@@ -44,6 +44,7 @@ const CLUSTER_TIMEOUT_MS = 300_000;
 function projectInputs(rows: ReturnType<typeof projectBd>[]): BdInputRow[] {
   return rows.map((r) => ({
     recordId: r.recordId,
+    source: "bd" as const,
     item: r.item,
     translate: r.translate,
     category: r.category,

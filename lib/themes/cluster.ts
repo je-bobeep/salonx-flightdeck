@@ -23,21 +23,26 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * Keeping this shape narrow keeps the prompt small (cheaper) and decoupled
  * from the full BdRow shape.
  */
-export type BdInputRow = {
+export type FeedbackInputRow = {
   recordId: string;
+  source: "bd" | "dev";
   item: string;
   translate: string;
   category: string[];
   subCategory: string;
   priority: string;
   ageDays: number | null;
+  /** For BD rows: the linked Dev record ids. For Dev rows: always []. */
   linkedDevIds: string[];
   /** Used to compute `rising`. */
   dateCreatedMs: number | null;
 };
 
+/** @deprecated alias retained until callers migrate. */
+export type BdInputRow = FeedbackInputRow;
+
 export type ClusterOptions = {
-  rows: BdInputRow[];
+  rows: FeedbackInputRow[];
   /** Theme names from the previous cluster run, for stable naming. */
   previousThemes?: { id: string; name: string; bdRecordIds: string[] }[];
   abortSignal?: AbortSignal;
@@ -50,15 +55,15 @@ export type ClusterOptions = {
  * is responsible for falling back to from-scratch when previous mode was
  * "fallback" (deterministic — incoherent themes can't be appended to). */
 export type IncrementalAssignOptions = {
-  newRows: BdInputRow[];
+  newRows: FeedbackInputRow[];
   existingThemes: Theme[];
-  /** Optional lookup from BD record_id → BdInputRow for ALL rows known this
-   * cycle (existing + new). When provided, the assigner injects up to 3
+  /** Optional lookup from BD record_id → FeedbackInputRow for ALL rows known
+   * this cycle (existing + new). When provided, the assigner injects up to 3
    * example item-strings per existing theme into the prompt — gives Claude
    * concrete anchors so a `[Kanzashi]`-shaped new row reliably lands in the
    * Kanzashi cluster even when the theme name is semantic ("Cancellation
    * UX"). When omitted the prompt falls back to name + description only. */
-  rowLookup?: Map<string, BdInputRow>;
+  rowLookup?: Map<string, FeedbackInputRow>;
   abortSignal?: AbortSignal;
   model?: string;
 };
